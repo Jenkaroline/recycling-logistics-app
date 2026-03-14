@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "600023019605",
+    "project_id": "recycling-logistics-app",
+    "storage_bucket": "recycling-logistics-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:600023019605:android:d41327a559cd21488164dc",
+        "android_client_info": {
+          "package_name": "pulsar.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD0UrjUQa8FTV6_68JGxPpiotzjXMN-P4A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
