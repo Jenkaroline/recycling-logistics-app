@@ -60,11 +60,23 @@ export default function VerifyEmailScreen() {
 
   return (
     <View style={{ padding: 20, flex: 1 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: 'absolute', left: 0 }} accessibilityLabel="Voltar">
+      <View style={{ 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        marginBottom: 12 
+        }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: 'absolute', left: 0, marginTop: 50 }} accessibilityLabel="Voltar">
           <Ionicons name="arrow-back" size={28} color="#222" />
         </TouchableOpacity>
-        <Text style={{ fontSize: 24, fontWeight: 'bold', textAlign: 'center' }}>Verificar E-mail</Text>
+        <Text style={{ 
+            fontSize: 24, 
+            fontWeight: 'bold', 
+            marginTop: 50, 
+            textAlign: 'center' 
+          }}>
+          Verificar E-mail
+        </Text>
       </View>
       <Text style={{ fontSize: 18, marginBottom: 16, textAlign: 'center' }}>
         Um e-mail de verificação foi enviado para {user?.email}. Por favor,

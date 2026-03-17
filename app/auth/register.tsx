@@ -51,7 +51,15 @@ export default function RegisterScreen() {
 
   return (
     <View style={{ padding: 20 }}>
-      <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 12, marginTop: 0, textAlign: 'center' }}>Cadastro</Text>
+      <Text style={{ 
+          fontSize: 24, 
+          fontWeight: 'bold', 
+          marginBottom: 12, 
+          marginTop: 50, 
+          textAlign: 'center' 
+        }}> 
+        Cadastro
+      </Text>
       <TextInput
         label="Email"
         value={email}

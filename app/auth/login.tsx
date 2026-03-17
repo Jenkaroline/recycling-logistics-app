@@ -10,6 +10,8 @@ import { auth } from "../../service/firebaseConfig";
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
+  
+
   Main: undefined;
   VerifyEmail: undefined;
 };
@@ -45,7 +47,7 @@ export default function LoginScreen() {
           fontSize: 24,
           fontWeight: "bold",
           marginBottom: 12,
-          marginTop: 0,
+          marginTop: 50,
           textAlign: "center",
         }}
       >
@@ -74,7 +76,7 @@ export default function LoginScreen() {
         mode="outlined"
         outlineStyle={{ borderRadius: 16 }}
       />
-      <Button mode="contained" onPress={handleLogin}>
+      <Button mode="contained" onPress={handleLogin} style={{ backgroundColor: '#9f7ab0'}}>
         Entrar
       </Button>
       <Button onPress={() => navigation.navigate("Register")}>

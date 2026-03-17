@@ -23,7 +23,7 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-      <Text style={{ fontSize: 24, marginBottom: 20 }}>Bem-vindo(a)!</Text>
+      <Text style={{ fontSize: 24, marginBottom: 20, color: '#a07db1' }}>Bem-vindo(a)!</Text>
     </View>
   );
 }

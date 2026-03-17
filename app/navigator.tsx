@@ -13,8 +13,8 @@ import { Alert, Text, View } from "react-native";
 import { auth } from "../service/firebaseConfig";
 import LoginScreen from "./auth/login";
 import RegisterScreen from "./auth/register";
-import HomeScreen from "./home";
 import VerifyEmailScreen from "./auth/verifyEmail";
+import HomeScreen from "./home";
 
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
@@ -59,6 +59,8 @@ function AppDrawer() {
     <Drawer.Navigator
       screenOptions={{
         headerShown: true,
+        drawerActiveBackgroundColor: '#9f7ab0',
+        drawerActiveTintColor: '#ffffff'
       }}
       drawerContent={(props) => <CustomDrawerContent {...props} />}
     >
@@ -71,10 +73,26 @@ function AppDrawer() {
 export default function MainNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Login"
+        component={LoginScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Register"
+        component={RegisterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="VerifyEmail"
+        component={VerifyEmailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Main"
+        component={AppDrawer}
+        options={{ headerShown: false }}
+      />
     </Stack.Navigator>
   );
 }
