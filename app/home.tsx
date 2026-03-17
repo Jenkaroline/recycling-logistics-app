@@ -9,12 +9,15 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const handleLogout = () => {
-    const confirmar = window.confirm("Tem certeza que deseja sair?");
-    if (confirmar) {
-        router.replace("/");
-        auth.signOut();
-    }
-    };
+    Alert.alert("Confirmar Saída", "Tem certeza que deseja sair?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Sair", onPress: () => {
+          router.replace("/");
+          auth.signOut();
+        }
+      }
+    ]);
+  };
 
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>

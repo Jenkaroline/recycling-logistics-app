@@ -12,6 +12,9 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const [showPassword, setShowPassword] = useState(false);
+
+
   const handleLogin = async () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
@@ -31,9 +34,10 @@ export default function LoginScreen() {
 
       <TextInput
         label="Senha"
-        secureTextEntry
         value={password}
         onChangeText={setPassword}
+        secureTextEntry={!showPassword}
+        right={<TextInput.Icon icon={showPassword ? "eye-off" : "eye"} onPress={() => setShowPassword(!showPassword)} />}
       />
 
       <Button mode="contained" onPress={handleLogin}>
