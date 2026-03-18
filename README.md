@@ -1,33 +1,34 @@
+
 # recycling-logistics-app
-Mobile application built with React Native and Expo that connects recyclable waste collectors with drivers and recycling centers, creating a logistics network to improve recycling efficiency and reduce environmental pollution.
+Aplicativo móvel desenvolvido com React Native e Expo que conecta coletores de resíduos recicláveis a motoristas e centros de reciclagem, criando uma rede logística para melhorar a eficiência da reciclagem e reduzir a poluição ambiental.
 
 # Recycling Logistics App ♻️
 
-This project is a mobile application developed with React Native and Expo that aims to connect recyclable waste collectors with drivers and recycling centers.
+Este projeto é um aplicativo móvel desenvolvido com React Native e Expo que tem como objetivo conectar coletores de resíduos recicláveis a motoristas e centros de reciclagem.
 
-The goal is to create a logistics network that simplifies the transportation of recyclable materials and contributes to reducing environmental pollution, especially in coastal and urban areas.
+O objetivo é criar uma rede logística que simplifique o transporte de materiais recicláveis e contribua para a redução da poluição ambiental, especialmente em áreas costeiras e urbanas.
 
-The project is also aligned with the Sustainable Development Goal 14 (Life Below Water), encouraging the removal of waste that impacts oceans and aquatic ecosystems.
+O projeto também está alinhado ao Objetivo de Desenvolvimento Sustentável 14 (Vida na Água), incentivando a remoção de resíduos que impactam oceanos e ecossistemas aquáticos.
 
-## Features
+## Funcionalidades
 
-- User registration and authentication
-- Different user roles (collector, driver, recycling center)
-- Request pickup for recyclable materials
-- Connect collectors with drivers for transportation
-- Basic logistics management for recycling flow
+- Cadastro e autenticação de usuários
+- Diferentes perfis de usuário (coletor, motorista, centro de reciclagem)
+- Solicitação de coleta de materiais recicláveis
+- Conexão entre coletores e motoristas para transporte
+- Gestão básica do fluxo logístico de reciclagem
 
-## Technologies
+## Tecnologias
 
 - React Native
 - Expo
-- Firebase Authentication
+- Autenticação Firebase
 - React Native Paper
 
-## Project Status
+## Status do Projeto
 
-🚧 Currently in development.
+🚧 Em desenvolvimento.
 
-## Purpose
+## Propósito
 
-This project was created as part of a university project focused on mobile development, sustainability, and the exploration of technology-driven solutions for environmental challenges.
+Este projeto foi criado como parte de um trabalho universitário focado em desenvolvimento mobile, sustentabilidade e exploração de soluções tecnológicas para desafios ambientais.

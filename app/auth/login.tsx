@@ -10,8 +10,6 @@ import { auth } from "../../service/firebaseConfig";
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
-  
-
   Main: undefined;
   VerifyEmail: undefined;
 };
