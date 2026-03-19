@@ -1,5 +1,5 @@
-
 # recycling-logistics-app
+
 Aplicativo móvel desenvolvido com React Native e Expo que conecta coletores de resíduos recicláveis a motoristas e centros de reciclagem, criando uma rede logística para melhorar a eficiência da reciclagem e reduzir a poluição ambiental.
 
 # Recycling Logistics App ♻️
