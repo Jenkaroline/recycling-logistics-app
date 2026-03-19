@@ -47,12 +47,3 @@ npm start
 - Se tiver problemas, tente deletar a pasta `node_modules` e rodar `npm install` novamente.
 - Para mais ajuda, veja a [documentação do Expo](https://docs.expo.dev/).
 
----
-
-**Summary of requirements:**
-
-- Node.js 18+
-- npm
-- Expo CLI
-- All dependencies from `package.json` (install with `npm install`)
-- (Optional) Firebase credentials for your own project
