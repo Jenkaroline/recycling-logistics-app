@@ -1,10 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { reload, sendEmailVerification } from "firebase/auth";
 import React, { useEffect, useState } from "react";
-import { Text, View, TouchableOpacity } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 import { Button } from "react-native-paper";
-import { Ionicons } from '@expo/vector-icons';
 import { auth } from "../../service/firebaseConfig";
 
 type RootStackParamList = {
@@ -48,7 +48,7 @@ export default function VerifyEmailScreen() {
           setError("E-mail ainda não verificado.");
         }
       }
-    } catch (e) {
+    } catch {
       setError("Erro ao checar verificação.");
     }
     setChecking(false);
@@ -60,25 +60,33 @@ export default function VerifyEmailScreen() {
 
   return (
     <View style={{ padding: 20, flex: 1 }}>
-      <View style={{ 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        marginBottom: 12 
-        }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: 'absolute', left: 0, marginTop: 50 }} accessibilityLabel="Voltar">
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 12,
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={{ position: "absolute", left: 0, marginTop: 50 }}
+          accessibilityLabel="Voltar"
+        >
           <Ionicons name="arrow-back" size={28} color="#222" />
         </TouchableOpacity>
-        <Text style={{ 
-            fontSize: 24, 
-            fontWeight: 'bold', 
-            marginTop: 50, 
-            textAlign: 'center' 
-          }}>
+        <Text
+          style={{
+            fontSize: 24,
+            fontWeight: "bold",
+            marginTop: 50,
+            textAlign: "center",
+          }}
+        >
           Verificar E-mail
         </Text>
       </View>
-      <Text style={{ fontSize: 18, marginBottom: 16, textAlign: 'center' }}>
+      <Text style={{ fontSize: 18, marginBottom: 16, textAlign: "center" }}>
         Um e-mail de verificação foi enviado para {user?.email}. Por favor,
         verifique seu e-mail para continuar.
       </Text>

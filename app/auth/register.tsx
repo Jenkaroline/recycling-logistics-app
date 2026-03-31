@@ -4,6 +4,7 @@ import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
 } from "firebase/auth";
+import { getFirestore, collection, doc, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import { View, Text } from "react-native";
 import { Button, TextInput } from "react-native-paper";
@@ -18,6 +19,7 @@ type RootStackParamList = {
 
 export default function RegisterScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -26,6 +28,10 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     setError("");
+    if (!username.trim()) {
+      setError("Nome de usuário é obrigatório!");
+      return;
+    }
     if (password !== confirmPassword) {
       setError("As senhas não coincidem!");
       return;
@@ -37,6 +43,13 @@ export default function RegisterScreen() {
         password,
       );
       if (userCredential.user) {
+        const db = getFirestore();
+        await setDoc(doc(db, "users", userCredential.user.uid), {
+          uid: userCredential.user.uid,
+          username: username.trim(),
+          email: email,
+          createdAt: new Date(),
+        });
         await sendEmailVerification(userCredential.user);
         navigation.navigate("VerifyEmail");
       }
@@ -60,6 +73,14 @@ export default function RegisterScreen() {
         }}> 
         Cadastro
       </Text>
+      <TextInput
+        label="Nome de Usuário"
+        value={username}
+        onChangeText={setUsername}
+        style={{ marginBottom: 16, borderRadius: 16, backgroundColor: '#fff' }}
+        mode="outlined"
+        outlineStyle={{ borderRadius: 16 }}
+      />
       <TextInput
         label="Email"
         value={email}
