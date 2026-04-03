@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import React, { useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
 
@@ -39,24 +39,18 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={{ padding: 20 }}>
-      <Text
-        style={{
-          fontSize: 24,
-          fontWeight: "bold",
-          marginBottom: 12,
-          marginTop: 50,
-          textAlign: "center",
-        }}
-      >
-        Login
-      </Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Login</Text>
       <TextInput
-        label="Email"
+        label="E-mail"
         value={email}
         onChangeText={setEmail}
-        style={{ marginBottom: 16, borderRadius: 16, backgroundColor: "#fff" }}
+        style={styles.input}
         mode="outlined"
+        activeOutlineColor="#36a3ff"
+        outlineColor="#5b7ea6"
+        textColor="#0a2740"
+        theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
       <TextInput
@@ -70,16 +64,49 @@ export default function LoginScreen() {
             onPress={() => setShowPassword(!showPassword)}
           />
         }
-        style={{ marginBottom: 16, borderRadius: 16, backgroundColor: "#fff" }}
+        style={styles.input}
         mode="outlined"
+        activeOutlineColor="#36a3ff"
+        outlineColor="#5b7ea6"
+        textColor="#0a2740"
+        theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
-      <Button mode="contained" onPress={handleLogin} style={{ backgroundColor: '#9f7ab0'}}>
+      <Button
+        mode="contained"
+        buttonColor="#36a3ff"
+        textColor="#032746"
+        onPress={handleLogin}
+      >
         Entrar
       </Button>
-      <Button onPress={() => navigation.navigate("Register")}>
+      <Button
+        textColor="#b7cde6"
+        onPress={() => navigation.navigate("Register")}
+      >
         Criar conta
       </Button>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "#061526",
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: "700",
+    marginBottom: 12,
+    marginTop: 50,
+    textAlign: "center",
+    color: "#ffffff",
+  },
+  input: {
+    marginBottom: 16,
+    borderRadius: 16,
+    backgroundColor: "#e8f2ff",
+  },
+});

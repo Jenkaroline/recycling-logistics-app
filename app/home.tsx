@@ -74,26 +74,35 @@ export default function HomeScreen() {
   ];
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: "#f5f7fb" }}>
+    <ScrollView style={{ flex: 1, backgroundColor: "#061526" }}>
       <View style={{ padding: 20 }}>
-        <Text style={{ fontSize: 24, fontWeight: "700", marginBottom: 6 }}>
+        <Text
+          style={{
+            fontSize: 24,
+            fontWeight: "700",
+            marginBottom: 6,
+            color: "#ffffff",
+          }}
+        >
           Registro de consumo
         </Text>
-        <Text style={{ color: "#4b5563", marginBottom: 16 }}>
+        <Text style={{ color: "#b7cde6", marginBottom: 16 }}>
           Escolha uma categoria ou crie uma customizada.
         </Text>
 
         {/* Total Today Card */}
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 12,
             padding: 14,
             marginBottom: 14,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
-          <Text style={{ fontSize: 15, color: "#6b7280" }}>Total hoje</Text>
-          <Text style={{ fontSize: 24, fontWeight: "700", color: "#111827" }}>
+          <Text style={{ fontSize: 15, color: "#b7cde6" }}>Total hoje</Text>
+          <Text style={{ fontSize: 24, fontWeight: "700", color: "#eaf4ff" }}>
             {todayTotal.toFixed(0)} g
           </Text>
         </View>
@@ -101,30 +110,41 @@ export default function HomeScreen() {
         {/* Total Accumulated Card */}
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 12,
             padding: 14,
             marginBottom: 16,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
-          <Text style={{ fontSize: 15, color: "#6b7280" }}>
+          <Text style={{ fontSize: 15, color: "#b7cde6" }}>
             Total acumulado
           </Text>
-          <Text style={{ fontSize: 24, fontWeight: "700", color: "#111827" }}>
+          <Text style={{ fontSize: 24, fontWeight: "700", color: "#eaf4ff" }}>
             {totalGrams.toFixed(0)} g
           </Text>
         </View>
 
         {/* Categories Grid */}
-        <Text style={{ fontSize: 16, fontWeight: "600", marginBottom: 10 }}>
+        <Text
+          style={{
+            fontSize: 16,
+            fontWeight: "600",
+            marginBottom: 10,
+            color: "#eaf4ff",
+          }}
+        >
           Categorias
         </Text>
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 12,
             padding: 12,
             marginBottom: 12,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
           <View
@@ -143,7 +163,7 @@ export default function HomeScreen() {
                   paddingVertical: 10,
                   paddingHorizontal: 8,
                   marginBottom: 8,
-                  backgroundColor: "#f3f4f6",
+                  backgroundColor: "#123252",
                   borderRadius: 8,
                   alignItems: "center",
                 }}
@@ -151,19 +171,19 @@ export default function HomeScreen() {
                 <MaterialCommunityIcons
                   name={category.icon as any}
                   size={28}
-                  color="#6b7280"
+                  color="#36a3ff"
                   style={{ marginBottom: 4 }}
                 />
                 <Text
                   style={{
                     fontSize: 12,
                     textAlign: "center",
-                    color: "#374151",
+                    color: "#eaf4ff",
                   }}
                 >
                   {category.name}
                 </Text>
-                <Text style={{ fontSize: 11, color: "#9ca3af" }}>
+                <Text style={{ fontSize: 11, color: "#b7cde6" }}>
                   {category.weightGrams}g
                 </Text>
               </TouchableOpacity>
@@ -175,6 +195,7 @@ export default function HomeScreen() {
         <Button
           mode="outlined"
           onPress={() => setModalVisible(true)}
+          textColor="#b7cde6"
           style={{ marginBottom: 16 }}
         >
           + Criar categoria customizada
@@ -189,8 +210,8 @@ export default function HomeScreen() {
             marginBottom: 10,
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: "600" }}>
-            Ultimos registros
+          <Text style={{ fontSize: 18, fontWeight: "600", color: "#eaf4ff" }}>
+            Últimos registros
           </Text>
           {entries.length > 5 ? (
             <TouchableOpacity
@@ -198,7 +219,7 @@ export default function HomeScreen() {
                 navigation.navigate("Perfil", { section: "records" })
               }
             >
-              <Text style={{ color: "#5f4b8b", fontWeight: "600" }}>
+              <Text style={{ color: "#36a3ff", fontWeight: "600" }}>
                 Ver mais
               </Text>
             </TouchableOpacity>
@@ -207,16 +228,18 @@ export default function HomeScreen() {
 
         <ScrollView
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 12,
             padding: 12,
             height: containerHeight,
             maxHeight: 250,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
           nestedScrollEnabled={true}
         >
           {lastEntries.length === 0 ? (
-            <Text style={{ color: "#6b7280" }}>Nenhum registro ainda.</Text>
+            <Text style={{ color: "#b7cde6" }}>Nenhum registro ainda.</Text>
           ) : (
             lastEntries.map((item) => (
               <View
@@ -226,13 +249,15 @@ export default function HomeScreen() {
                   justifyContent: "space-between",
                   paddingVertical: 8,
                   borderBottomWidth: 1,
-                  borderBottomColor: "#e5e7eb",
+                  borderBottomColor: "#1e3a57",
                 }}
               >
-                <Text>
+                <Text style={{ color: "#d7ebff" }}>
                   {new Date(item.createdAt).toLocaleDateString("pt-BR")}
                 </Text>
-                <Text style={{ fontWeight: "700" }}>{item.amountGrams} g</Text>
+                <Text style={{ fontWeight: "700", color: "#eaf4ff" }}>
+                  {item.amountGrams} g
+                </Text>
               </View>
             ))
           )}
@@ -251,6 +276,8 @@ export default function HomeScreen() {
           <View
             style={{
               backgroundColor: "#fff",
+              borderColor: "#123252",
+              borderWidth: 1,
               borderTopLeftRadius: 16,
               borderTopRightRadius: 16,
               padding: 20,
@@ -297,7 +324,7 @@ export default function HomeScreen() {
                     paddingVertical: 8,
                     alignItems: "center",
                     backgroundColor:
-                      newCategoryIcon === icon ? "#9f7ab0" : "#f3f4f6",
+                      newCategoryIcon === icon ? "#1f6fb2" : "#f3f4f6",
                     borderRadius: 8,
                     marginBottom: 8,
                   }}

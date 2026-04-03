@@ -6,7 +6,7 @@ import "react-native-reanimated";
 export default function RootLayout() {
   return (
     <ThemeProvider value={DefaultTheme}>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false }} />
     </ThemeProvider>
   );

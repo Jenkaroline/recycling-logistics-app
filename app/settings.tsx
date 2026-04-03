@@ -1,11 +1,11 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import {
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  signOut,
-  updateEmail,
-  updatePassword,
+    EmailAuthProvider,
+    reauthenticateWithCredential,
+    signOut,
+    updateEmail,
+    updatePassword,
 } from "firebase/auth";
 import React, { useMemo, useState } from "react";
 import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
@@ -71,7 +71,7 @@ export default function SettingsScreen() {
 
   const handleUpdateEmail = async () => {
     if (!newEmail.trim()) {
-      Alert.alert("Erro", "Digite o novo email");
+      Alert.alert("Erro", "Digite o novo e-mail");
       return;
     }
     if (!currentPassword.trim()) {
@@ -92,12 +92,12 @@ export default function SettingsScreen() {
       await reauthenticateWithCredential(user, credential);
       await updateEmail(user, newEmail);
 
-      setMessage("Email atualizado com sucesso!");
+      setMessage("E-mail atualizado com sucesso!");
       setNewEmail("");
       setCurrentPassword("");
       setEmail(newEmail);
     } catch (error: any) {
-      Alert.alert("Erro", error.message || "Falha ao atualizar email");
+      Alert.alert("Erro", error.message || "Falha ao atualizar e-mail");
     } finally {
       setLoading(false);
     }
@@ -142,14 +142,16 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, padding: 20, backgroundColor: "#f5f7fb" }}>
+    <ScrollView style={{ flex: 1, padding: 20, backgroundColor: "#061526" }}>
       <View
         style={{
-          backgroundColor: "#fff",
+          backgroundColor: "#0c2740",
           borderRadius: 14,
           padding: 16,
           marginBottom: 14,
           alignItems: "center",
+          borderWidth: 1,
+          borderColor: "#123252",
         }}
       >
         <View
@@ -157,42 +159,51 @@ export default function SettingsScreen() {
             width: 86,
             height: 86,
             borderRadius: 43,
-            backgroundColor: "#ece6f1",
+            backgroundColor: "#123252",
             alignItems: "center",
             justifyContent: "center",
             marginBottom: 12,
           }}
         >
-          <MaterialCommunityIcons name="account" size={48} color="#5f4b8b" />
+          <MaterialCommunityIcons name="account" size={48} color="#36a3ff" />
         </View>
 
-        <Text style={{ fontSize: 20, fontWeight: "700", marginBottom: 4 }}>
+        <Text
+          style={{
+            fontSize: 20,
+            fontWeight: "700",
+            marginBottom: 4,
+            color: "#eaf4ff",
+          }}
+        >
           {fullName}
         </Text>
-        <Text style={{ color: "#6b7280", marginBottom: 2 }}>{email}</Text>
-        <Text style={{ color: "#94a3b8" }}>Membro desde {memberSince}</Text>
+        <Text style={{ color: "#b7cde6", marginBottom: 2 }}>{email}</Text>
+        <Text style={{ color: "#9ab6d3" }}>Membro desde {memberSince}</Text>
       </View>
 
       {activeSection === "menu" ? (
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 14,
             padding: 14,
             marginBottom: 20,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
           <TouchableOpacity
             onPress={() => setActiveSection("edit")}
             style={{
-              backgroundColor: "#f3f4f6",
+              backgroundColor: "#123252",
               borderRadius: 10,
               paddingVertical: 14,
               paddingHorizontal: 12,
               marginBottom: 10,
             }}
           >
-            <Text style={{ fontWeight: "700", color: "#1f2937", fontSize: 15 }}>
+            <Text style={{ fontWeight: "700", color: "#eaf4ff", fontSize: 15 }}>
               Editar informações da conta
             </Text>
           </TouchableOpacity>
@@ -200,14 +211,14 @@ export default function SettingsScreen() {
           <TouchableOpacity
             onPress={() => setActiveSection("records")}
             style={{
-              backgroundColor: "#f3f4f6",
+              backgroundColor: "#123252",
               borderRadius: 10,
               paddingVertical: 14,
               paddingHorizontal: 12,
               marginBottom: 10,
             }}
           >
-            <Text style={{ fontWeight: "700", color: "#1f2937", fontSize: 15 }}>
+            <Text style={{ fontWeight: "700", color: "#eaf4ff", fontSize: 15 }}>
               Ver registros
             </Text>
           </TouchableOpacity>
@@ -215,7 +226,7 @@ export default function SettingsScreen() {
           <TouchableOpacity
             onPress={handleSignOut}
             style={{
-              backgroundColor: "#fee2e2",
+              backgroundColor: "#4a1d27",
               borderRadius: 10,
               paddingVertical: 14,
               paddingHorizontal: 12,
@@ -229,29 +240,39 @@ export default function SettingsScreen() {
       ) : activeSection === "edit" ? (
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 14,
             padding: 14,
             marginBottom: 20,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
           <Button
             mode="text"
+            textColor="#b7cde6"
             onPress={() => setActiveSection("menu")}
             style={{ alignSelf: "flex-start", marginBottom: 8 }}
           >
             Voltar
           </Button>
 
-          <Text style={{ fontSize: 16, fontWeight: "600", marginBottom: 12 }}>
-            Alterar Email
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "600",
+              marginBottom: 12,
+              color: "#eaf4ff",
+            }}
+          >
+            Alterar e-mail
           </Text>
           <TextInput
-            label="Novo email"
+            label="Novo e-mail"
             value={newEmail}
             onChangeText={setNewEmail}
             mode="outlined"
-            style={{ marginBottom: 12, backgroundColor: "#fff" }}
+            style={{ marginBottom: 12, backgroundColor: "#e8f2ff" }}
             keyboardType="email-address"
           />
 
@@ -261,7 +282,7 @@ export default function SettingsScreen() {
             onChangeText={setCurrentPassword}
             secureTextEntry={!showPassword}
             mode="outlined"
-            style={{ marginBottom: 12, backgroundColor: "#fff" }}
+            style={{ marginBottom: 12, backgroundColor: "#e8f2ff" }}
             right={
               <TextInput.Icon
                 icon={showPassword ? "eye-off" : "eye"}
@@ -272,15 +293,24 @@ export default function SettingsScreen() {
 
           <Button
             mode="contained"
+            buttonColor="#36a3ff"
+            textColor="#032746"
             onPress={handleUpdateEmail}
             loading={loading}
             disabled={!newEmail.trim() || !currentPassword.trim()}
             style={{ marginBottom: 20 }}
           >
-            Atualizar Email
+            Atualizar e-mail
           </Button>
 
-          <Text style={{ fontSize: 16, fontWeight: "600", marginBottom: 12 }}>
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: "600",
+              marginBottom: 12,
+              color: "#eaf4ff",
+            }}
+          >
             Alterar Senha
           </Text>
 
@@ -290,7 +320,7 @@ export default function SettingsScreen() {
             onChangeText={setCurrentPassword}
             secureTextEntry={!showPassword}
             mode="outlined"
-            style={{ marginBottom: 12, backgroundColor: "#fff" }}
+            style={{ marginBottom: 12, backgroundColor: "#e8f2ff" }}
           />
 
           <TextInput
@@ -299,7 +329,7 @@ export default function SettingsScreen() {
             onChangeText={setNewPassword}
             secureTextEntry={!showPassword}
             mode="outlined"
-            style={{ marginBottom: 12, backgroundColor: "#fff" }}
+            style={{ marginBottom: 12, backgroundColor: "#e8f2ff" }}
           />
 
           <TextInput
@@ -308,12 +338,12 @@ export default function SettingsScreen() {
             onChangeText={setConfirmPassword}
             secureTextEntry={!showPassword}
             mode="outlined"
-            style={{ marginBottom: 16, backgroundColor: "#fff" }}
+            style={{ marginBottom: 16, backgroundColor: "#e8f2ff" }}
           />
 
           {message ? (
             <View style={{ marginBottom: 12 }}>
-              <Text style={{ color: "#16a34a", fontWeight: "600" }}>
+              <Text style={{ color: "#2dd4bf", fontWeight: "600" }}>
                 {message}
               </Text>
             </View>
@@ -321,6 +351,8 @@ export default function SettingsScreen() {
 
           <Button
             mode="contained"
+            buttonColor="#36a3ff"
+            textColor="#032746"
             onPress={handleUpdatePassword}
             loading={loading}
             disabled={!newPassword.trim() || !currentPassword.trim()}
@@ -331,29 +363,39 @@ export default function SettingsScreen() {
       ) : (
         <View
           style={{
-            backgroundColor: "#fff",
+            backgroundColor: "#0c2740",
             borderRadius: 14,
             padding: 14,
             marginBottom: 20,
+            borderWidth: 1,
+            borderColor: "#123252",
           }}
         >
           <Button
             mode="text"
+            textColor="#b7cde6"
             onPress={() => setActiveSection("menu")}
             style={{ alignSelf: "flex-start", marginBottom: 8 }}
           >
             Voltar
           </Button>
 
-          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 4 }}>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "700",
+              marginBottom: 4,
+              color: "#eaf4ff",
+            }}
+          >
             Todos os registros
           </Text>
-          <Text style={{ color: "#6b7280", marginBottom: 12 }}>
+          <Text style={{ color: "#b7cde6", marginBottom: 12 }}>
             {sortedEntries.length} registro(s)
           </Text>
 
           {sortedEntries.length === 0 ? (
-            <Text style={{ color: "#6b7280" }}>Nenhum registro ainda.</Text>
+            <Text style={{ color: "#b7cde6" }}>Nenhum registro ainda.</Text>
           ) : (
             sortedEntries.map((item) => (
               <View
@@ -363,14 +405,14 @@ export default function SettingsScreen() {
                   justifyContent: "space-between",
                   paddingVertical: 10,
                   borderBottomWidth: 1,
-                  borderBottomColor: "#e5e7eb",
+                  borderBottomColor: "#1e3a57",
                 }}
               >
                 <View>
-                  <Text style={{ color: "#111827", fontWeight: "500" }}>
+                  <Text style={{ color: "#eaf4ff", fontWeight: "500" }}>
                     {new Date(item.createdAt).toLocaleDateString("pt-BR")}
                   </Text>
-                  <Text style={{ color: "#9ca3af", fontSize: 12 }}>
+                  <Text style={{ color: "#9ab6d3", fontSize: 12 }}>
                     {new Date(item.createdAt).toLocaleTimeString("pt-BR", {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -378,7 +420,7 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
 
-                <Text style={{ fontWeight: "700", color: "#111827" }}>
+                <Text style={{ fontWeight: "700", color: "#eaf4ff" }}>
                   {item.amountGrams} g
                 </Text>
               </View>

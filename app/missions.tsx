@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 
 type Mission = {
@@ -53,19 +53,19 @@ export default function MissionsScreen() {
     return [
       {
         id: "m1",
-        title: "Missao 1: constancia",
+        title: "Missão 1: constância",
         description: "Registre consumo em 7 dias diferentes.",
         progress: clamp(uniqueDays / 7),
       },
       {
         id: "m2",
-        title: "Missao 2: media consciente",
-        description: "Mantenha media abaixo de 300 g por registro.",
+        title: "Missão 2: média consciente",
+        description: "Mantenha média abaixo de 300 g por registro.",
         progress: avgConsumption === 0 ? 0 : clamp(300 / avgConsumption),
       },
       {
         id: "m3",
-        title: "Missao 3: reduzir 20%",
+        title: "Missão 3: reduzir 20%",
         description: "Consuma 20% menos que na semana anterior.",
         progress: reductionProgress,
       },
@@ -73,38 +73,24 @@ export default function MissionsScreen() {
   }, [entries]);
 
   return (
-    <ScrollView style={{ flex: 1, padding: 20, backgroundColor: "#f5f7fb" }}>
-      <Text style={{ fontSize: 24, fontWeight: "700", marginBottom: 6 }}>
-        Missoes
-      </Text>
-      <Text style={{ color: "#4b5563", marginBottom: 16 }}>
-        Complete as metas e acompanhe sua evolucao no consumo de plastico.
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>Missões</Text>
+      <Text style={styles.subtitle}>
+        Complete as metas e acompanhe sua evolução no consumo de plástico.
       </Text>
 
       {missions.map((mission) => {
         const percent = Math.round(mission.progress * 100);
         return (
-          <View
-            key={mission.id}
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 12,
-              padding: 14,
-              marginBottom: 12,
-            }}
-          >
-            <Text style={{ fontSize: 17, fontWeight: "700", marginBottom: 6 }}>
-              {mission.title}
-            </Text>
-            <Text style={{ color: "#6b7280", marginBottom: 10 }}>
-              {mission.description}
-            </Text>
+          <View key={mission.id} style={styles.card}>
+            <Text style={styles.cardTitle}>{mission.title}</Text>
+            <Text style={styles.cardDescription}>{mission.description}</Text>
 
             <View
               style={{
                 height: 10,
                 borderRadius: 999,
-                backgroundColor: "#e5e7eb",
+                backgroundColor: "#1e3a57",
                 overflow: "hidden",
                 marginBottom: 6,
               }}
@@ -112,16 +98,56 @@ export default function MissionsScreen() {
               <View
                 style={{
                   width: `${percent}%`,
-                  backgroundColor: percent === 100 ? "#16a34a" : "#2563eb",
+                  backgroundColor: percent === 100 ? "#2dd4bf" : "#36a3ff",
                   height: "100%",
                 }}
               />
             </View>
 
-            <Text style={{ fontWeight: "600" }}>{percent}% concluido</Text>
+            <Text style={styles.progressText}>{percent}% concluído</Text>
           </View>
         );
       })}
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "#061526",
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginBottom: 6,
+    color: "#ffffff",
+  },
+  subtitle: {
+    color: "#b7cde6",
+    marginBottom: 16,
+  },
+  card: {
+    backgroundColor: "#0c2740",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#123252",
+  },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 6,
+    color: "#eaf4ff",
+  },
+  cardDescription: {
+    color: "#b7cde6",
+    marginBottom: 10,
+  },
+  progressText: {
+    fontWeight: "600",
+    color: "#d7ebff",
+  },
+});

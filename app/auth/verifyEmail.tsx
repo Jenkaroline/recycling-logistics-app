@@ -3,7 +3,7 @@ import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { reload, sendEmailVerification } from "firebase/auth";
 import React, { useEffect, useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Button } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
 
@@ -59,7 +59,7 @@ export default function VerifyEmailScreen() {
   }, []);
 
   return (
-    <View style={{ padding: 20, flex: 1 }}>
+    <View style={styles.container}>
       <View
         style={{
           flexDirection: "row",
@@ -73,28 +73,19 @@ export default function VerifyEmailScreen() {
           style={{ position: "absolute", left: 0, marginTop: 50 }}
           accessibilityLabel="Voltar"
         >
-          <Ionicons name="arrow-back" size={28} color="#222" />
+          <Ionicons name="arrow-back" size={28} color="#eaf4ff" />
         </TouchableOpacity>
-        <Text
-          style={{
-            fontSize: 24,
-            fontWeight: "bold",
-            marginTop: 50,
-            textAlign: "center",
-          }}
-        >
-          Verificar E-mail
-        </Text>
+        <Text style={styles.title}>Verificar E-mail</Text>
       </View>
-      <Text style={{ fontSize: 18, marginBottom: 16, textAlign: "center" }}>
+      <Text style={styles.description}>
         Um e-mail de verificação foi enviado para {user?.email}. Por favor,
         verifique seu e-mail para continuar.
       </Text>
-      {error ? (
-        <Text style={{ color: "red", marginBottom: 8 }}>{error}</Text>
-      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button
         mode="contained"
+        buttonColor="#36a3ff"
+        textColor="#032746"
         onPress={handleCheckVerification}
         loading={checking}
       >
@@ -102,6 +93,7 @@ export default function VerifyEmailScreen() {
       </Button>
       <Button
         mode="text"
+        textColor="#b7cde6"
         onPress={handleSendVerification}
         disabled={!canResend}
         style={{ marginTop: 8 }}
@@ -111,3 +103,28 @@ export default function VerifyEmailScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 20,
+    flex: 1,
+    backgroundColor: "#061526",
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginTop: 50,
+    textAlign: "center",
+    color: "#ffffff",
+  },
+  description: {
+    fontSize: 18,
+    marginBottom: 16,
+    textAlign: "center",
+    color: "#b7cde6",
+  },
+  error: {
+    color: "#ff8a8a",
+    marginBottom: 8,
+  },
+});

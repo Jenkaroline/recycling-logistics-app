@@ -19,7 +19,7 @@ import LoginScreen from "./auth/login";
 import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
 import HomeScreen from "./home";
-import MapsScreen from "./maps";
+import MapsScreen from "@/app/maps";
 import MissionsScreen from "./missions";
 import SettingsScreen from "./settings";
 import StatisticsScreen from "./statistics";
@@ -60,6 +60,9 @@ function BottomTabNavigator() {
     <BottomTab.Navigator
       screenOptions={({ route }) => ({
         headerShown: true,
+        headerStyle: { backgroundColor: "#0c2740" },
+        headerTintColor: "#eaf4ff",
+        tabBarStyle: { backgroundColor: "#0a2238", borderTopColor: "#123252" },
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: keyof typeof Ionicons.glyphMap = "home";
 
@@ -77,8 +80,8 @@ function BottomTabNavigator() {
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: "#9f7ab0",
-        tabBarInactiveTintColor: "#95a3b3",
+        tabBarActiveTintColor: "#36a3ff",
+        tabBarInactiveTintColor: "#9ab6d3",
       })}
     >
       <BottomTab.Screen
@@ -115,7 +118,9 @@ function AppDrawer() {
     <Drawer.Navigator
       screenOptions={{
         headerShown: false,
-        drawerActiveBackgroundColor: "#9f7ab0",
+        drawerStyle: { backgroundColor: "#061526" },
+        drawerInactiveTintColor: "#b7cde6",
+        drawerActiveBackgroundColor: "#123252",
         drawerActiveTintColor: "#ffffff",
       }}
       drawerContent={(props) => <CustomDrawerContent {...props} />}
