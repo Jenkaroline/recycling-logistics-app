@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Button } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
+import { useThemePreference } from "../../src/ThemePreferenceContext";
 
 type RootStackParamList = {
   Login: undefined;
@@ -16,10 +17,25 @@ type RootStackParamList = {
 
 export default function VerifyEmailScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const { darkModeEnabled } = useThemePreference();
   const [canResend, setCanResend] = useState(true);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const user = auth.currentUser;
+
+  const palette = darkModeEnabled
+    ? {
+        bg: "#061526",
+        textPrimary: "#ffffff",
+        textSecondary: "#b7cde6",
+        error: "#ff8a8a",
+      }
+    : {
+        bg: "#f4f8fc",
+        textPrimary: "#1d3750",
+        textSecondary: "#5d748b",
+        error: "#c74848",
+      };
 
   const handleSendVerification = async () => {
     setError("");
@@ -59,7 +75,7 @@ export default function VerifyEmailScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: palette.bg }]}>
       <View
         style={{
           flexDirection: "row",
@@ -73,15 +89,16 @@ export default function VerifyEmailScreen() {
           style={{ position: "absolute", left: 0, marginTop: 50 }}
           accessibilityLabel="Voltar"
         >
-          <Ionicons name="arrow-back" size={28} color="#eaf4ff" />
+          <Ionicons name="arrow-back" size={28} color={palette.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Verificar E-mail</Text>
       </View>
-      <Text style={styles.description}>
+      <Text style={[styles.description, { color: palette.textSecondary }]}>
         Um e-mail de verificação foi enviado para {user?.email}. Por favor,
         verifique seu e-mail para continuar.
       </Text>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <Text style={[styles.error, { color: palette.error }]}>{error}</Text>
+      ) : null}
       <Button
         mode="contained"
         buttonColor="#36a3ff"
@@ -93,7 +110,7 @@ export default function VerifyEmailScreen() {
       </Button>
       <Button
         mode="text"
-        textColor="#b7cde6"
+        textColor={palette.textSecondary}
         onPress={handleSendVerification}
         disabled={!canResend}
         style={{ marginTop: 8 }}
@@ -108,23 +125,20 @@ const styles = StyleSheet.create({
   container: {
     padding: 20,
     flex: 1,
-    backgroundColor: "#061526",
   },
   title: {
     fontSize: 24,
     fontWeight: "700",
-    marginTop: 50,
+    marginTop: 0,
+    marginBottom: 0,
     textAlign: "center",
-    color: "#ffffff",
   },
   description: {
     fontSize: 18,
     marginBottom: 16,
     textAlign: "center",
-    color: "#b7cde6",
   },
   error: {
-    color: "#ff8a8a",
     marginBottom: 8,
   },
 });

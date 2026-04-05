@@ -1,14 +1,16 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import {
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
+    createUserWithEmailAndPassword,
+    sendEmailVerification,
+    updateProfile,
 } from "firebase/auth";
-import { doc, getFirestore, setDoc } from "firebase/firestore";
+import { doc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
+import { useThemePreference } from "../../src/ThemePreferenceContext";
 
 type RootStackParamList = {
   Login: undefined;
@@ -19,12 +21,31 @@ type RootStackParamList = {
 
 export default function RegisterScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const { darkModeEnabled } = useThemePreference();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  const palette = darkModeEnabled
+    ? {
+        bg: "#061526",
+        textPrimary: "#ffffff",
+        inputBg: "#e8f2ff",
+        inputText: "#0a2740",
+        inputBorder: "#5b7ea6",
+        link: "#b7cde6",
+      }
+    : {
+        bg: "#f4f8fc",
+        textPrimary: "#1d3750",
+        inputBg: "#ffffff",
+        inputText: "#1f3346",
+        inputBorder: "#96aec6",
+        link: "#5d748b",
+      };
 
   const handleRegister = async () => {
     setError("");
@@ -44,11 +65,19 @@ export default function RegisterScreen() {
       );
       if (userCredential.user) {
         const db = getFirestore();
+        await updateProfile(userCredential.user, {
+          displayName: username.trim(),
+        });
+
         await setDoc(doc(db, "users", userCredential.user.uid), {
           uid: userCredential.user.uid,
           username: username.trim(),
           email: email,
-          createdAt: new Date(),
+          avatarUrl: "",
+          bio: "",
+          followersCount: 0,
+          followingCount: 0,
+          createdAt: serverTimestamp(),
         });
         await sendEmailVerification(userCredential.user);
         navigation.navigate("VerifyEmail");
@@ -63,17 +92,17 @@ export default function RegisterScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Cadastro</Text>
+    <View style={[styles.container, { backgroundColor: palette.bg }]}>
+      <Text style={[styles.title, { color: palette.textPrimary }]}>Cadastro</Text>
       <TextInput
         label="Nome de Usuário"
         value={username}
         onChangeText={setUsername}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -81,11 +110,11 @@ export default function RegisterScreen() {
         label="E-mail"
         value={email}
         onChangeText={setEmail}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -100,11 +129,11 @@ export default function RegisterScreen() {
             onPress={() => setShowPassword(!showPassword)}
           />
         }
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -119,11 +148,11 @@ export default function RegisterScreen() {
             onPress={() => setShowPassword(!showPassword)}
           />
         }
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -148,7 +177,7 @@ export default function RegisterScreen() {
       </Button>
       <Button
         mode="text"
-        textColor="#b7cde6"
+        textColor={palette.link}
         onPress={() => navigation.navigate("Login")}
         style={{ marginTop: 12 }}
       >
@@ -162,19 +191,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: "#061526",
+    justifyContent: "center",
   },
   title: {
     fontSize: 26,
     fontWeight: "700",
-    marginBottom: 12,
-    marginTop: 50,
+    marginBottom: 20,
+    marginTop: 0,
     textAlign: "center",
-    color: "#ffffff",
   },
   input: {
     marginBottom: 16,
     borderRadius: 16,
-    backgroundColor: "#e8f2ff",
+    backgroundColor: "transparent",
   },
 });

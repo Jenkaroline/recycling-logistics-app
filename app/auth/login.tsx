@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
+import { useThemePreference } from "../../src/ThemePreferenceContext";
 
 // Defina os nomes das rotas do seu Stack
 type RootStackParamList = {
@@ -16,9 +17,28 @@ type RootStackParamList = {
 
 export default function LoginScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const { darkModeEnabled } = useThemePreference();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  const palette = darkModeEnabled
+    ? {
+        bg: "#061526",
+        textPrimary: "#ffffff",
+        inputBg: "#e8f2ff",
+        inputText: "#0a2740",
+        inputBorder: "#5b7ea6",
+        link: "#b7cde6",
+      }
+    : {
+        bg: "#f4f8fc",
+        textPrimary: "#1d3750",
+        inputBg: "#ffffff",
+        inputText: "#1f3346",
+        inputBorder: "#96aec6",
+        link: "#5d748b",
+      };
 
   const handleLogin = async () => {
     try {
@@ -39,17 +59,17 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Login</Text>
+    <View style={[styles.container, { backgroundColor: palette.bg }]}>
+      <Text style={[styles.title, { color: palette.textPrimary }]}>Entrar</Text>
       <TextInput
         label="E-mail"
         value={email}
         onChangeText={setEmail}
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -64,11 +84,11 @@ export default function LoginScreen() {
             onPress={() => setShowPassword(!showPassword)}
           />
         }
-        style={styles.input}
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
-        outlineColor="#5b7ea6"
-        textColor="#0a2740"
+        outlineColor={palette.inputBorder}
+        textColor={palette.inputText}
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
@@ -81,7 +101,7 @@ export default function LoginScreen() {
         Entrar
       </Button>
       <Button
-        textColor="#b7cde6"
+        textColor={palette.link}
         onPress={() => navigation.navigate("Register")}
       >
         Criar conta
@@ -94,19 +114,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: "#061526",
+    justifyContent: "center",
   },
   title: {
     fontSize: 26,
     fontWeight: "700",
-    marginBottom: 12,
-    marginTop: 50,
+    marginBottom: 20,
+    marginTop: 0,
     textAlign: "center",
-    color: "#ffffff",
   },
   input: {
     marginBottom: 16,
     borderRadius: 16,
-    backgroundColor: "#e8f2ff",
+    backgroundColor: "transparent",
   },
 });
