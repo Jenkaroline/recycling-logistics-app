@@ -17,8 +17,8 @@ type RootStackParamList = {
   Register: undefined;
   Main: undefined;
   VerifyEmail: undefined;
+  EnrollPhone: undefined;
 };
-
 export default function RegisterScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { darkModeEnabled } = useThemePreference();

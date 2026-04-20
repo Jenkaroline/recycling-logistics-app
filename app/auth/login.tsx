@@ -1,11 +1,12 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { getMultiFactorResolver, signInWithEmailAndPassword } from "firebase/auth";
 import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { auth } from "../../service/firebaseConfig";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
+import { sendPhoneLoginCode } from "../../src/TwoFactorAuthService";
 
 // Defina os nomes das rotas do seu Stack
 type RootStackParamList = {
@@ -13,6 +14,7 @@ type RootStackParamList = {
   Register: undefined;
   Main: undefined;
   VerifyEmail: undefined;
+  Verify2FA: { resolver: any };
 };
 
 export default function LoginScreen() {
@@ -21,6 +23,8 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const palette = darkModeEnabled
     ? {
@@ -41,6 +45,8 @@ export default function LoginScreen() {
       };
 
   const handleLogin = async () => {
+    setError("");
+    setIsLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(
         auth,
@@ -53,8 +59,20 @@ export default function LoginScreen() {
         return;
       }
       navigation.navigate("Main");
-    } catch (error) {
-      alert((error as any).message);
+    } catch (caughtError: any) {
+      if (caughtError?.code === "auth/multi-factor-auth-required") {
+        try {
+          const resolver = getMultiFactorResolver(auth, caughtError);
+          await sendPhoneLoginCode(resolver);
+          navigation.navigate("Verify2FA", { resolver });
+        } catch (resolverError: any) {
+          setError(resolverError.message || "Erro ao processar a segunda etapa de autenticação.");
+        }
+      } else {
+        setError(caughtError?.message || "Não foi possível entrar.");
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -65,6 +83,7 @@ export default function LoginScreen() {
         label="E-mail"
         value={email}
         onChangeText={setEmail}
+        editable={!isLoading}
         style={[styles.input, { backgroundColor: palette.inputBg }]}
         mode="outlined"
         activeOutlineColor="#36a3ff"
@@ -77,6 +96,7 @@ export default function LoginScreen() {
         label="Senha"
         value={password}
         onChangeText={setPassword}
+        editable={!isLoading}
         secureTextEntry={!showPassword}
         right={
           <TextInput.Icon
@@ -92,17 +112,23 @@ export default function LoginScreen() {
         theme={{ colors: { primary: "#36a3ff", onSurfaceVariant: "#365a7d" } }}
         outlineStyle={{ borderRadius: 16 }}
       />
+      {error && (
+        <Text style={[styles.error, { color: "#ff6b6b" }]}>{error}</Text>
+      )}
       <Button
         mode="contained"
         buttonColor="#36a3ff"
         textColor="#032746"
         onPress={handleLogin}
+        loading={isLoading}
+        disabled={isLoading}
       >
         Entrar
       </Button>
       <Button
         textColor={palette.link}
         onPress={() => navigation.navigate("Register")}
+        disabled={isLoading}
       >
         Criar conta
       </Button>
@@ -127,5 +153,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     backgroundColor: "transparent",
+  },
+  error: {
+    fontSize: 14,
+    marginBottom: 12,
+    fontWeight: "600",
+    textAlign: "center",
   },
 });

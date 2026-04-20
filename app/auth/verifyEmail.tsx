@@ -13,6 +13,7 @@ type RootStackParamList = {
   Register: undefined;
   Main: undefined;
   VerifyEmail: undefined;
+  EnrollPhone: undefined;
 };
 
 export default function VerifyEmailScreen() {
@@ -59,7 +60,7 @@ export default function VerifyEmailScreen() {
       if (user) {
         await reload(user);
         if (user.emailVerified) {
-          navigation.navigate("Main");
+          navigation.navigate("EnrollPhone");
         } else {
           setError("E-mail ainda não verificado.");
         }
