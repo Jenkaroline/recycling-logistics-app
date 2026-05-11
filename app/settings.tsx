@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import {
   deleteUser,
@@ -30,6 +30,11 @@ import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText
 import { auth, storage } from "../service/firebaseConfig";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
+import {
+  getEnrolledFactors,
+  has2FAEnrolled,
+  unenrollPhoneNumber,
+} from "../src/TwoFactorAuthService";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 
 type ActivePanel = "none" | "settings" | "statistics";
@@ -203,6 +208,10 @@ export default function SettingsScreen() {
   const [selectedBarKey, setSelectedBarKey] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [loadingAccount, setLoadingAccount] = useState(false);
+  const [isLoading2FA, setIsLoading2FA] = useState(false);
+  const [isUpdating2FA, setIsUpdating2FA] = useState(false);
+  const [has2FAEnabled, setHas2FAEnabled] = useState<boolean | null>(null);
+  const [factors, setFactors] = useState<any[]>([]);
   const [showPassword, setShowPassword] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -222,6 +231,55 @@ export default function SettingsScreen() {
   const closeActivePanel = React.useCallback(() => {
     setActivePanel("none");
   }, []);
+
+  const refresh2FAStatus = React.useCallback(async () => {
+    try {
+      setIsLoading2FA(true);
+      const enabled = await has2FAEnrolled();
+      const enrolledFactors = await getEnrolledFactors();
+      setHas2FAEnabled(enabled);
+      setFactors(enrolledFactors);
+    } catch {
+      setHas2FAEnabled(false);
+      setFactors([]);
+    } finally {
+      setIsLoading2FA(false);
+    }
+  }, []);
+
+  const handleDisable2FA = async () => {
+    if (factors.length === 0) {
+      Alert.alert("Nenhum fator encontrado", "Não há 2FA configurado para remover.");
+      return;
+    }
+
+    Alert.alert(
+      "Remover 2FA",
+      "Deseja realmente desativar a autenticação de dois fatores?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Remover",
+          style: "destructive",
+          onPress: async () => {
+            setIsUpdating2FA(true);
+            try {
+              await unenrollPhoneNumber(factors[0].uid);
+              Alert.alert("Sucesso", "A autenticação de dois fatores foi removida.");
+              await refresh2FAStatus();
+            } catch (error: any) {
+              Alert.alert(
+                "Erro",
+                error?.message || "Não foi possível remover a autenticação de dois fatores.",
+              );
+            } finally {
+              setIsUpdating2FA(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   React.useEffect(() => {
     const section = route.params?.section;
@@ -251,12 +309,40 @@ export default function SettingsScreen() {
       }
     };
 
+    const load2FAStatus = async () => {
+      try {
+        setIsLoading2FA(true);
+        const enabled = await has2FAEnrolled();
+        const enrolledFactors = await getEnrolledFactors();
+        if (mounted) {
+          setHas2FAEnabled(enabled);
+          setFactors(enrolledFactors);
+        }
+      } catch {
+        if (mounted) {
+          setHas2FAEnabled(false);
+          setFactors([]);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading2FA(false);
+        }
+      }
+    };
+
     void loadLocationPreference();
+    void load2FAStatus();
 
     return () => {
       mounted = false;
     };
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void refresh2FAStatus();
+    }, [refresh2FAStatus]),
+  );
 
   React.useEffect(() => {
     void AsyncStorage.setItem(LOCATION_PREF_KEY, String(locationEnabled));
@@ -945,27 +1031,43 @@ export default function SettingsScreen() {
         >
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-              Aparência
+              Autenticação de dois fatores
             </Text>
             <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {darkModeEnabled ? "Modo escuro" : "Modo claro"}
+              {isLoading2FA
+                ? "Carregando status..."
+                : has2FAEnabled
+                  ? "Ativada"
+                  : "Desativada"}
             </Text>
           </View>
-          <Switch
-            value={darkModeEnabled}
-            onValueChange={setDarkModeEnabled}
-            thumbColor={palette.switchThumb}
-            trackColor={{ true: palette.switchOn, false: palette.switchOff }}
-          />
+          <Button
+            mode="contained"
+            buttonColor={has2FAEnabled ? "#dc2626" : "#36a3ff"}
+            textColor={has2FAEnabled ? "#ffffff" : "#032746"}
+            loading={isUpdating2FA}
+            onPress={async () => {
+              if (has2FAEnabled) {
+                await handleDisable2FA();
+              } else {
+                navigation.navigate("EnrollPhone");
+              }
+            }}
+            disabled={isLoading2FA || isUpdating2FA}
+          >
+            {has2FAEnabled ? "Desativar" : "Ativar"}
+          </Button>
         </View>
 
         <View
           style={{
-            backgroundColor: palette.dangerPanel,
-            borderWidth: 1,
-            borderColor: palette.dangerBorder,
+            backgroundColor: palette.panelAlt,
             borderRadius: 12,
             padding: 12,
+            marginBottom: 10,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
           }}
         >
           <Text

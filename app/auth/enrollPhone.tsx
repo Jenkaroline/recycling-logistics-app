@@ -1,13 +1,15 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { StyleSheet, Text, View, ScrollView, Alert } from "react-native";
 import { Button, TextInput, Card } from "react-native-paper";
+import { FirebaseRecaptchaVerifierModal } from "expo-firebase-recaptcha";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
 import {
   sendPhoneEnrollmentCode,
   enrollPhoneNumber,
 } from "../../src/TwoFactorAuthService";
+import { firebaseConfig } from "../../service/firebaseConfig";
 
 type RootStackParamList = {
   EnrollPhone: undefined;
@@ -23,6 +25,7 @@ export default function EnrollPhoneScreen() {
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const recaptchaVerifier = useRef<any>(null);
 
   const palette = darkModeEnabled
     ? {
@@ -53,7 +56,7 @@ export default function EnrollPhoneScreen() {
 
     setIsLoading(true);
     try {
-      await sendPhoneEnrollmentCode(phoneNumber);
+      await sendPhoneEnrollmentCode(phoneNumber, recaptchaVerifier.current);
       setStep("code");
     } catch (err: any) {
       setError(err.message || "Erro ao enviar código. Tente novamente.");
@@ -102,6 +105,11 @@ export default function EnrollPhoneScreen() {
         { backgroundColor: palette.bg },
       ]}
     >
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifier}
+        firebaseConfig={firebaseConfig}
+        attemptInvisibleVerification
+      />
       <Card style={[styles.card, { backgroundColor: palette.card }]}>
         <Card.Content>
           <Text style={[styles.title, { color: palette.textPrimary }]}>

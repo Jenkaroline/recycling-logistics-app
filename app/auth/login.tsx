@@ -1,10 +1,11 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { getMultiFactorResolver, signInWithEmailAndPassword } from "firebase/auth";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
-import { auth } from "../../service/firebaseConfig";
+import { FirebaseRecaptchaVerifierModal } from "expo-firebase-recaptcha";
+import { auth, firebaseConfig } from "../../service/firebaseConfig";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
 import { sendPhoneLoginCode } from "../../src/TwoFactorAuthService";
 
@@ -22,6 +23,7 @@ export default function LoginScreen() {
   const { darkModeEnabled } = useThemePreference();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const recaptchaVerifier = useRef<any>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -63,7 +65,7 @@ export default function LoginScreen() {
       if (caughtError?.code === "auth/multi-factor-auth-required") {
         try {
           const resolver = getMultiFactorResolver(auth, caughtError);
-          await sendPhoneLoginCode(resolver);
+          await sendPhoneLoginCode(resolver, recaptchaVerifier.current);
           navigation.navigate("Verify2FA", { resolver });
         } catch (resolverError: any) {
           setError(resolverError.message || "Erro ao processar a segunda etapa de autenticação.");
@@ -77,7 +79,12 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: palette.bg }]}>
+    <View style={[styles.container, { backgroundColor: palette.bg }]}> 
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifier}
+        firebaseConfig={firebaseConfig}
+        attemptInvisibleVerification
+      />
       <Text style={[styles.title, { color: palette.textPrimary }]}>Entrar</Text>
       <TextInput
         label="E-mail"

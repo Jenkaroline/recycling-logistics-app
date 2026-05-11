@@ -2,17 +2,28 @@ import {
   MultiFactorResolver,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
-  RecaptchaVerifier,
   multiFactor,
 } from "firebase/auth";
 import { auth } from "../service/firebaseConfig";
 
 let verificationId: string | null = null;
 
+const formatFirebaseError = (error: any) => {
+  if (error?.code === "auth/operation-not-allowed") {
+    return new Error(
+      "Autenticação por telefone não está habilitada no Firebase. Ative o provedor Phone em Authentication > Sign-in method."
+    );
+  }
+  return error;
+};
+
 /**
  * Enviar código SMS para configurar 2FA durante o registro
  */
-export const sendPhoneEnrollmentCode = async (phoneNumber: string) => {
+export const sendPhoneEnrollmentCode = async (
+  phoneNumber: string,
+  recaptchaVerifier: any,
+) => {
   try {
     const user = auth.currentUser;
     if (!user) {
@@ -20,21 +31,18 @@ export const sendPhoneEnrollmentCode = async (phoneNumber: string) => {
     }
 
     const phoneProvider = new PhoneAuthProvider(auth);
-    const recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
-      size: "invisible",
-    });
-
     const verifyId = await phoneProvider.verifyPhoneNumber(
       phoneNumber,
-      recaptchaVerifier
+      recaptchaVerifier,
     );
 
     verificationId = verifyId;
     console.log("Código SMS enviado para:", phoneNumber);
     return true;
   } catch (error) {
-    console.error("Erro ao enviar código SMS:", error);
-    throw error;
+    const formattedError = formatFirebaseError(error);
+    console.error("Erro ao enviar código SMS:", formattedError);
+    throw formattedError;
   }
 };
 
@@ -71,7 +79,10 @@ export const enrollPhoneNumber = async (smsCode: string) => {
 /**
  * Enviar código SMS para fazer login com 2FA
  */
-export const sendPhoneLoginCode = async (resolver: MultiFactorResolver) => {
+export const sendPhoneLoginCode = async (
+  resolver: MultiFactorResolver,
+  recaptchaVerifier: any,
+) => {
   try {
     const phoneHint = resolver.hints.find(
       (hint) => hint.factorId === PhoneMultiFactorGenerator.FACTOR_ID,
@@ -82,10 +93,6 @@ export const sendPhoneLoginCode = async (resolver: MultiFactorResolver) => {
     }
 
     const phoneProvider = new PhoneAuthProvider(auth);
-    const recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
-      size: "invisible",
-    });
-
     const verifyId = await phoneProvider.verifyPhoneNumber(
       {
         multiFactorHint: phoneHint,
@@ -98,8 +105,9 @@ export const sendPhoneLoginCode = async (resolver: MultiFactorResolver) => {
     console.log("Código SMS de login enviado para o fator registrado");
     return true;
   } catch (error) {
-    console.error("Erro ao enviar código SMS de login:", error);
-    throw error;
+    const formattedError = formatFirebaseError(error);
+    console.error("Erro ao enviar código SMS de login:", formattedError);
+    throw formattedError;
   }
 };
 
