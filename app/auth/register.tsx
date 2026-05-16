@@ -179,9 +179,7 @@ export default function RegisterScreen() {
     } catch (error: any) {
       const mappedError = translateFirebaseError(error);
       setError(mappedError);
-      setStatusMessage(
-        `Cadastro interrompido: ${error?.message || mappedError}`
-      );
+      setStatusMessage("");
     } finally {
       setIsRegistering(false);
     }
@@ -289,7 +287,7 @@ export default function RegisterScreen() {
         {/* error shown above title now */}
         {statusMessage ? (
           <View style={styles.statusContainer}>
-            <ActivityIndicator color={palette.accent} />
+            {!error && <ActivityIndicator color={palette.accent} />}
             <Text style={[styles.statusText, { color: palette.textPrimary }]}>{statusMessage}</Text>
           </View>
         ) : null}

@@ -1,42 +1,39 @@
+import React, { useState } from "react";
+import { Image } from "expo-image";
+import { ScrollView, View, Text, StyleSheet, useWindowDimensions, ActivityIndicator } from "react-native";
+import { Button, TextInput } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { Image } from "expo-image";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
-import React, { useState } from "react";
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { Button, TextInput } from "react-native-paper";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../../service/firebaseConfig";
 import { translateFirebaseError } from "../../src/firebaseErrorMapper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ErrorMessage from "../components/ErrorMessage";
 import WavesBackground from "../components/WavesBackground";
 
-// Defina os nomes das rotas do seu Stack
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
-  Main: undefined;
-  VerifyEmail: undefined;
+  VerifyEmail: { message?: string; error?: string } | undefined;
   ResetPassword: undefined;
 };
 
-export default function LoginScreen() {
+export default function ResetPasswordScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const { top: insetTop } = useSafeAreaInsets();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
 
   const sanitize = (s: string) => s.replace(/\s+/g, "");
 
   const palette = darkModeEnabled
     ? {
         bg: "#061526",
-        bgGlow: "rgba(54, 163, 255, 0.12)",
         cardBg: "rgba(8, 28, 48, 0.88)",
         cardBorder: "rgba(183, 205, 230, 0.18)",
         textPrimary: "#ffffff",
@@ -44,13 +41,10 @@ export default function LoginScreen() {
         inputBg: "#e8f2ff",
         inputText: "#0a2740",
         inputBorder: "#5b7ea6",
-        link: "#b7cde6",
         accent: "#36a3ff",
-        accentSoft: "rgba(54, 163, 255, 0.14)",
       }
     : {
         bg: "#f4f8fc",
-        bgGlow: "rgba(54, 163, 255, 0.16)",
         cardBg: "rgba(255, 255, 255, 0.92)",
         cardBorder: "rgba(149, 175, 198, 0.32)",
         textPrimary: "#1d3750",
@@ -58,38 +52,40 @@ export default function LoginScreen() {
         inputBg: "#ffffff",
         inputText: "#1f3346",
         inputBorder: "#96aec6",
-        link: "#5d748b",
         accent: "#36a3ff",
-        accentSoft: "rgba(54, 163, 255, 0.12)",
       };
 
-    const heroImageSource = error
-      ? require("../../assets/images/erro-ilustracao.png")
-      : require("../../assets/images/icon.png");
-    const horizontalPadding = width < 360 ? 14 : width < 420 ? 18 : 22;
-    const cardWidth = Math.min(460, width - horizontalPadding * 2);
-    const heroImageSize = Math.min(160, Math.round(cardWidth * 0.45));
+  const horizontalPadding = width < 360 ? 14 : width < 420 ? 18 : 22;
+  const cardWidth = Math.min(460, width - horizontalPadding * 2);
+  const heroImageSize = Math.min(140, Math.round(cardWidth * 0.42));
 
-  const handleLogin = async () => {
+  const heroImageSource = error
+    ? require("../../assets/images/erro-ilustracao.png")
+    : require("../../assets/images/senha.png");
+
+  const handleSendReset = async () => {
     setError("");
+    setStatusMessage("");
     if (!email.trim()) {
-      setError("Por favor, insira seu e-mail.");
+      setError("E-mail é obrigatório!");
       return;
     }
-    if (!password) {
-      setError("Por favor, insira sua senha.");
-      return;
-    }
+
+    setIsSending(true);
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      if (userCredential.user && !userCredential.user.emailVerified) {
-        await signOut(auth);
-        setError("Usuário não encontrado ou credenciais inválidas.");
-        return;
-      }
-      navigation.navigate("Main");
+      const actionCodeSettings = {
+        // The deep link that will open the app. Firebase may require Dynamic Links for some platforms.
+        url: "projetofaculdade://reset",
+        handleCodeInApp: true,
+      } as any;
+      await sendPasswordResetEmail(auth, sanitize(email), actionCodeSettings);
+      setStatusMessage("E-mail de redefinição enviado. Verifique sua caixa de entrada.");
     } catch (err: any) {
-      setError(translateFirebaseError(err));
+      const mapped = translateFirebaseError(err);
+      setError(mapped);
+      setStatusMessage("");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -111,7 +107,7 @@ export default function LoginScreen() {
           { backgroundColor: palette.cardBg, borderColor: palette.cardBorder, width: cardWidth, zIndex: 2 },
         ]}
       >
-          <View style={[styles.heroWrap, { marginBottom: error ? 12 : -Math.round(heroImageSize * 0.12) }]}>
+        <View style={[styles.heroWrap, { marginBottom: error ? 12 : 12 }]}> 
           <View style={[styles.heroFrame, { backgroundColor: "transparent" }]}>
             <Image
               source={heroImageSource}
@@ -122,13 +118,11 @@ export default function LoginScreen() {
           </View>
         </View>
 
-        <Text style={[styles.title, { color: palette.textPrimary }]}>Entrar</Text>
+        <Text style={[styles.title, { color: palette.textPrimary }]}>Redefinir senha</Text>
         {error ? (
           <ErrorMessage message={error} />
         ) : (
-          <Text style={[styles.description, { color: palette.textSecondary }]}> 
-            Entre para continuar.
-          </Text>
+          <Text style={[styles.description, { color: palette.textSecondary }]}>Insira seu e‑mail para receber o link de redefinição.</Text>
         )}
 
         <TextInput
@@ -143,52 +137,34 @@ export default function LoginScreen() {
           theme={{ colors: { primary: palette.accent, onSurfaceVariant: "#365a7d" } }}
           outlineStyle={{ borderRadius: 16 }}
         />
-        <TextInput
-          label="Senha"
-          value={password}
-          onChangeText={(t) => setPassword(sanitize(t))}
-          secureTextEntry={!showPassword}
-          right={
-            <TextInput.Icon
-              icon={showPassword ? "eye-off" : "eye"}
-              onPress={() => setShowPassword(!showPassword)}
-            />
-          }
-          style={[styles.input, { backgroundColor: palette.inputBg }]}
-          mode="outlined"
-          activeOutlineColor={palette.accent}
-          outlineColor={palette.inputBorder}
-          textColor={palette.inputText}
-          theme={{ colors: { primary: palette.accent, onSurfaceVariant: "#365a7d" } }}
-          outlineStyle={{ borderRadius: 16 }}
-        />
 
-        {/* error shown under title */}
+        {statusMessage ? (
+          <View style={styles.statusContainer}>
+            {!error && <ActivityIndicator color={palette.accent} />}
+            <Text style={[styles.statusText, { color: palette.textPrimary }]}>{statusMessage}</Text>
+          </View>
+        ) : null}
 
         <Button
           mode="contained"
+          onPress={handleSendReset}
+          loading={isSending}
+          disabled={isSending}
           buttonColor={palette.accent}
           textColor="#032746"
-          onPress={handleLogin}
           style={styles.primaryButton}
           contentStyle={styles.primaryButtonContent}
         >
-          Entrar
-        </Button>
-        <Button
-          textColor={palette.link}
-          onPress={() => navigation.navigate("ResetPassword")}
-          style={styles.linkButton}
-        >
-          Esqueci minha senha
+          Enviar e-mail
         </Button>
 
         <Button
-          textColor={palette.link}
-          onPress={() => navigation.navigate("Register")}
+          mode="text"
+          textColor={palette.textSecondary}
+          onPress={() => navigation.navigate("Login")}
           style={styles.linkButton}
         >
-          Criar conta
+          Voltar ao login
         </Button>
       </View>
     </ScrollView>
@@ -225,15 +201,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  heroImage: {
-  },
-  kicker: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
+  heroImage: {},
   title: {
     fontSize: 23,
     fontWeight: "800",
@@ -253,6 +221,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "transparent",
     width: "100%",
+  },
+  statusContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  statusText: {
+    marginTop: 5,
+    fontSize: 12,
+    textAlign: "center",
   },
   primaryButton: {
     width: "100%",

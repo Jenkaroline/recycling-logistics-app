@@ -25,6 +25,8 @@ import {
 import LoginScreen from "./auth/login";
 import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
+import ResetPasswordScreen from "./auth/resetPassword";
+import ResetPasswordConfirmScreen from "./auth/resetPasswordConfirm";
 import CommunityScreen from "./community";
 import HomeScreen from "./home";
 import MissionsScreen from "./missions";
@@ -454,6 +456,16 @@ export default function MainNavigator() {
               <Stack.Screen
                 name="VerifyEmail"
                 component={VerifyEmailScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="ResetPassword"
+                component={ResetPasswordScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="ResetPasswordConfirm"
+                component={ResetPasswordConfirmScreen}
                 options={{ headerShown: false }}
               />
               <Stack.Screen
