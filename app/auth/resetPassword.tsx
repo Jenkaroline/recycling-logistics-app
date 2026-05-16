@@ -73,9 +73,7 @@ export default function ResetPasswordScreen() {
 
     setIsSending(true);
     try {
-      const redirectUrl = __DEV__
-        ? "http://localhost:3000/reset"
-        : "https://jenkaroline.github.io/recycling-logistics-app/reset";
+      const redirectUrl = "https://jenkaroline.github.io/recycling-logistics-app/reset";
       const actionCodeSettings = {
         // Use an HTTPS redirect page (GitHub Pages) that forwards the oobCode to the app scheme.
         url: redirectUrl,
