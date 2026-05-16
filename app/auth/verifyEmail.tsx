@@ -1,56 +1,111 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { reload, sendEmailVerification } from "firebase/auth";
-import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { deleteUser, reload, sendEmailVerification } from "firebase/auth";
+import React, { useEffect, useRef, useState } from "react";
+import { Image } from "expo-image";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Button } from "react-native-paper";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../../service/firebaseConfig";
+import { translateFirebaseError } from "../../src/firebaseErrorMapper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
+import ErrorMessage from "../components/ErrorMessage";
+import SuccessMessage from "../components/SuccessMessage";
+import WavesBackground from "../components/WavesBackground";
 
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   Main: undefined;
-  VerifyEmail: undefined;
+  VerifyEmail: { message?: string; error?: string } | undefined;
 };
 
 export default function VerifyEmailScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { darkModeEnabled } = useThemePreference();
+  const { width } = useWindowDimensions();
+  const { top: insetTop } = useSafeAreaInsets();
+  const [emailSent, setEmailSent] = useState(false);
   const [canResend, setCanResend] = useState(true);
+  const [resendTimer, setResendTimer] = useState(0);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const user = auth.currentUser;
+  const route = useRoute();
+  const routeParams: any = route.params;
+  const errorFromParams = routeParams?.error || "";
 
   const palette = darkModeEnabled
     ? {
         bg: "#061526",
+        bgGlow: "rgba(54, 163, 255, 0.12)",
+        cardBg: "rgba(8, 28, 48, 0.88)",
+        cardBorder: "rgba(183, 205, 230, 0.18)",
         textPrimary: "#ffffff",
         textSecondary: "#b7cde6",
+        accent: "#36a3ff",
+        accentSoft: "rgba(54, 163, 255, 0.14)",
         error: "#ff8a8a",
       }
     : {
         bg: "#f4f8fc",
+        bgGlow: "rgba(54, 163, 255, 0.16)",
+        cardBg: "rgba(255, 255, 255, 0.92)",
+        cardBorder: "rgba(149, 175, 198, 0.32)",
         textPrimary: "#1d3750",
         textSecondary: "#5d748b",
+        accent: "#36a3ff",
+        accentSoft: "rgba(54, 163, 255, 0.12)",
         error: "#c74848",
       };
+  const horizontalPadding = width < 360 ? 14 : width < 420 ? 18 : 22;
+  const cardWidth = Math.min(460, width - horizontalPadding * 2);
+  const heroSize = width < 360 ? 126 : width < 420 ? 142 : 158;
+  const heroImageSize = width < 360 ? 106 : width < 420 ? 120 : 134;
+  const adjustedHeroImageSize = Math.min(160, Math.round(cardWidth * 0.45));
 
   const handleSendVerification = async () => {
     setError("");
     if (user) {
       try {
         await sendEmailVerification(user);
+        setEmailSent(true);
         setCanResend(false);
-        setTimeout(() => setCanResend(true), 60000); // 60 segundos
+        setResendTimer(60);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+        timerRef.current = setInterval(() => {
+          setResendTimer((prev) => {
+            if (prev <= 1) {
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+              }
+              setCanResend(true);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
       } catch (e: any) {
-        setError("Erro ao enviar e-mail de verificação. " + (e?.message || ""));
+        setError(translateFirebaseError(e));
       }
     } else {
       setError("Usuário não autenticado. Faça login novamente.");
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleCheckVerification = async () => {
     setChecking(true);
@@ -64,8 +119,8 @@ export default function VerifyEmailScreen() {
           setError("E-mail ainda não verificado.");
         }
       }
-    } catch {
-      setError("Erro ao checar verificação.");
+    } catch (e: any) {
+      setError(translateFirebaseError(e));
     }
     setChecking(false);
   };
@@ -74,71 +129,212 @@ export default function VerifyEmailScreen() {
     setCanResend(true);
   }, []);
 
+  useEffect(() => {
+    if (errorFromParams) {
+      setError(errorFromParams);
+    }
+  }, [errorFromParams]);
+
   return (
-    <View style={[styles.container, { backgroundColor: palette.bg }]}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 12,
+    <ScrollView
+      style={{ flex: 1, backgroundColor: palette.bg }}
+      contentContainerStyle={[
+        styles.container,
+        { paddingHorizontal: horizontalPadding, paddingTop: insetTop + 18 },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      <WavesBackground dark={darkModeEnabled} />
+
+      <TouchableOpacity
+        onPress={async () => {
+          const currentUser = auth.currentUser;
+          if (currentUser && !currentUser.emailVerified) {
+            try {
+              await deleteUser(currentUser);
+            } catch (deleteError) {
+              console.warn("Não foi possível apagar o usuário não verificado.", deleteError);
+            }
+          }
+
+          if ((navigation as any).canGoBack && (navigation as any).canGoBack()) {
+            navigation.goBack();
+          } else {
+            navigation.navigate("Login");
+          }
         }}
+        style={[styles.backButton, { top: insetTop + 10 }]}
+        accessibilityLabel="Voltar"
       >
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={{ position: "absolute", left: 0, marginTop: 50 }}
-          accessibilityLabel="Voltar"
-        >
-          <Ionicons name="arrow-back" size={28} color={palette.textPrimary} />
-        </TouchableOpacity>
+        <Ionicons name="arrow-back" size={24} color={palette.textPrimary} />
+      </TouchableOpacity>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: palette.cardBg, borderColor: palette.cardBorder, width: cardWidth, zIndex: 2 },
+        ]}
+      >
+          <View style={[styles.heroWrap, { marginBottom: error ? 12 : -Math.round(adjustedHeroImageSize * 0.12) }]}>
+          <View style={[styles.heroFrame, { backgroundColor: palette.accentSoft }]}>
+            <Image
+              source={require("../../assets/images/icon.png")}
+              style={[styles.heroImage, { width: adjustedHeroImageSize, height: adjustedHeroImageSize }]}
+              contentFit="contain"
+              transition={180}
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.title, { color: palette.textPrimary }]}>Confirme seu e-mail</Text>
+        {error ? (
+          <ErrorMessage message={error} />
+        ) : (
+          <Text style={[styles.description, { color: palette.textSecondary }]}> 
+            {emailSent
+              ? `Enviamos o código para ${user?.email}. Abra seu e-mail e volte aqui para continuar.`
+              : "Toque para enviar o email de verificação e liberar as próximas ações."}
+          </Text>
+        )}
+
+        {!emailSent ? (
+          <Button
+            mode="contained"
+            buttonColor={palette.accent}
+            textColor="#032746"
+            onPress={handleSendVerification}
+            style={styles.primaryButton}
+            contentStyle={styles.primaryButtonContent}
+          >
+            Enviar email de verificação
+          </Button>
+        ) : (
+          <View style={styles.actionsWrap}>
+            <Button
+              mode="contained"
+              buttonColor={palette.accent}
+              textColor="#032746"
+              onPress={handleCheckVerification}
+              loading={checking}
+              style={styles.primaryButton}
+              contentStyle={styles.primaryButtonContent}
+            >
+              Já verifiquei meu e-mail
+            </Button>
+
+            <Button
+              mode="outlined"
+              textColor={palette.textPrimary}
+              onPress={handleSendVerification}
+              disabled={!canResend}
+              style={[styles.secondaryButton, { borderColor: palette.cardBorder }]}
+              contentStyle={styles.secondaryButtonContent}
+            >
+              Reenviar e-mail
+            </Button>
+
+            {!canResend && resendTimer > 0 ? (
+              <Text style={[styles.timer, { color: palette.textSecondary }]}>
+                Disponível em {resendTimer}s
+              </Text>
+            ) : null}
+          </View>
+        )}
       </View>
-      <Text style={[styles.description, { color: palette.textSecondary }]}>
-        Um e-mail de verificação foi enviado para {user?.email}. Por favor,
-        verifique seu e-mail para continuar.
-      </Text>
-      {error ? (
-        <Text style={[styles.error, { color: palette.error }]}>{error}</Text>
-      ) : null}
-      <Button
-        mode="contained"
-        buttonColor="#36a3ff"
-        textColor="#032746"
-        onPress={handleCheckVerification}
-        loading={checking}
-      >
-        Já verifiquei meu e-mail
-      </Button>
-      <Button
-        mode="text"
-        textColor={palette.textSecondary}
-        onPress={handleSendVerification}
-        disabled={!canResend}
-        style={{ marginTop: 8 }}
-      >
-        Reenviar e-mail
-      </Button>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
     flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingBottom: 18,
+    overflow: "hidden",
+  },
+  backButton: {
+    position: "absolute",
+    left: 16,
+    zIndex: 2,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  card: {
+    borderRadius: 28,
+    borderWidth: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  heroWrap: {
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  heroFrame: {
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroImage: {
+  },
+  kicker: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    marginBottom: 0,
   },
   title: {
-    fontSize: 24,
-    fontWeight: "700",
-    marginTop: 0,
-    marginBottom: 0,
+    fontSize: 23,
+    fontWeight: "800",
     textAlign: "center",
+    marginBottom: 6,
   },
   description: {
-    fontSize: 18,
-    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: "center",
+    maxWidth: 340,
+    marginBottom: 10,
   },
   error: {
     marginBottom: 8,
+    textAlign: "center",
+  },
+  actionsWrap: {
+    width: "100%",
+    alignItems: "center",
+  },
+  primaryButton: {
+    width: "100%",
+    marginTop: 4,
+    borderRadius: 18,
+  },
+  primaryButtonContent: {
+    height: 44,
+  },
+  secondaryButton: {
+    width: "100%",
+    marginTop: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  secondaryButtonContent: {
+    height: 42,
+  },
+  timer: {
+    marginTop: 4,
+    fontSize: 12,
   },
 });

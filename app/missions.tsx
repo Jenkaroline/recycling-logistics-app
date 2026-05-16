@@ -12,6 +12,7 @@ import { Button } from "react-native-paper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import { translateFirebaseError } from "../src/firebaseErrorMapper";
 
 type Mission = {
   id: string;
@@ -197,10 +198,7 @@ export default function MissionsScreen() {
         "Sua conquista foi compartilhada com seus amigos.",
       );
     } catch (error: any) {
-      Alert.alert(
-        "Erro",
-        error?.message || "Não foi possível compartilhar agora.",
-      );
+      Alert.alert("Erro", translateFirebaseError(error));
     } finally {
       setPublishing(false);
     }

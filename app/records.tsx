@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import { translateFirebaseError } from "../src/firebaseErrorMapper";
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("pt-BR");
@@ -97,7 +98,7 @@ export default function RecordsScreen() {
       });
       closeEdit();
     } catch (error: any) {
-      Alert.alert("Erro", error?.message || "Não foi possível salvar a edição.");
+      Alert.alert("Erro", translateFirebaseError(error));
     } finally {
       setSavingEdit(false);
     }
@@ -113,10 +114,7 @@ export default function RecordsScreen() {
           try {
             await deleteEntry(id);
           } catch (error: any) {
-            Alert.alert(
-              "Erro",
-              error?.message || "Não foi possível excluir o registro.",
-            );
+            Alert.alert("Erro", translateFirebaseError(error));
           }
         },
       },

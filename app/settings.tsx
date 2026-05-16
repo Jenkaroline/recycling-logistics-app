@@ -28,6 +28,7 @@ import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { auth, storage } from "../service/firebaseConfig";
+import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
@@ -587,9 +588,6 @@ export default function SettingsScreen() {
       await updateProfilePhoto(downloadUrl);
       Alert.alert("Ok", "Foto de perfil atualizada.");
     } catch (error: any) {
-      const code = error?.code ? ` (${error.code})` : "";
-      const message =
-        error?.message || "Não foi possível atualizar a foto agora.";
       const serverPayload =
         error?.customData?.serverResponse || error?.serverResponse || "";
 
@@ -598,7 +596,7 @@ export default function SettingsScreen() {
           ? `\n\nDetalhe do servidor: ${serverPayload.slice(0, 240)}`
           : "";
 
-      Alert.alert("Erro", `${message}${code}${hint}`);
+      Alert.alert("Erro", `${translateFirebaseError(error)}${hint}`);
     } finally {
       setUploadingPhoto(false);
     }
@@ -624,7 +622,7 @@ export default function SettingsScreen() {
       setCurrentPassword("");
       Alert.alert("Ok", "E-mail atualizado.");
     } catch (error: any) {
-      Alert.alert("Erro", error.message || "Falha ao atualizar e-mail.");
+      Alert.alert("Erro", translateFirebaseError(error));
     } finally {
       setLoadingAccount(false);
     }
@@ -655,7 +653,7 @@ export default function SettingsScreen() {
       setCurrentPassword("");
       Alert.alert("Ok", "Senha atualizada.");
     } catch (error: any) {
-      Alert.alert("Erro", error.message || "Falha ao atualizar senha.");
+      Alert.alert("Erro", translateFirebaseError(error));
     } finally {
       setLoadingAccount(false);
     }
@@ -689,11 +687,7 @@ export default function SettingsScreen() {
                         "Sua conta foi removida com sucesso.",
                       );
                     } catch (error: any) {
-                      Alert.alert(
-                        "Erro",
-                        error?.message ||
-                          "Não foi possível excluir sua conta agora.",
-                      );
+                      Alert.alert("Erro", translateFirebaseError(error));
                     }
                   },
                 },
