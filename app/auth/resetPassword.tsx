@@ -73,9 +73,12 @@ export default function ResetPasswordScreen() {
 
     setIsSending(true);
     try {
+      const redirectUrl = __DEV__
+        ? "http://localhost:3000/reset"
+        : "https://jenkaroline.github.io/recycling-logistics-app/reset";
       const actionCodeSettings = {
-        // The deep link that will open the app. Firebase may require Dynamic Links for some platforms.
-        url: "projetofaculdade://reset",
+        // Use an HTTPS redirect page (GitHub Pages) that forwards the oobCode to the app scheme.
+        url: redirectUrl,
         handleCodeInApp: true,
       } as any;
       await sendPasswordResetEmail(auth, sanitize(email), actionCodeSettings);
