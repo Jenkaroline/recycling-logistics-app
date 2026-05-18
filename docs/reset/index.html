@@ -23,15 +23,17 @@
       <div id="resetForm" style="display:none">
         <label>Nova senha
           <input id="newPassword" type="password" placeholder="Digite a nova senha" />
+          <input id="confirmPassword" type="password" placeholder="Confirme a nova senha" />
+
         </label>
         <div class="actions">
           <button id="submitBtn" class="button">Confirmar nova senha</button>
-          <a id="openLink" class="button" href="#">Abrir no app</a>
         </div>
       </div>
-
+<!--
       <h4 style="margin-top:16px">Código (oobCode)</h4>
       <pre id="code">—</pre>
+-->
     </div>
 
     <script type="module">
@@ -56,50 +58,41 @@
       if(!oob){ const raw = location.href; const m = raw.match(/[?&]oobCode=([^&]+)/i) || raw.match(/oobCode=([^&]+)/i); if(m) oob = decodeURIComponent(m[1]); }
 
       const info = document.getElementById('info');
-      const codeEl = document.getElementById('code');
-      const openLink = document.getElementById('openLink');
       const resetForm = document.getElementById('resetForm');
       const submitBtn = document.getElementById('submitBtn');
       const newPasswordInput = document.getElementById('newPassword');
-
-      function tryOpenApp(oobCode){
-        const deep = 'ciclo://reset?oobCode=' + encodeURIComponent(oobCode);
-        openLink.href = deep;
-        openLink.textContent = 'Abrir no app';
-        // pequena tentativa de redirecionar ao app (pode falhar silenciosamente)
-        setTimeout(()=>{ window.location.href = deep; }, 700);
-      }
+      const confirmPasswordInput = document.getElementById('confirmPassword');
 
       if(oob){
-        codeEl.textContent = oob;
         // Verifica o código e exibe email associado
         verifyPasswordResetCode(auth, oob)
           .then(email => {
             info.innerHTML = '<p><strong>Conta:</strong> ' + email + '</p>';
             resetForm.style.display = 'block';
-            tryOpenApp(oob);
           })
           .catch(err => {
             info.innerHTML = '<p style="color:#b00020">Erro ao processar o código: ' + (err.message||err.code) + '</p>';
-            codeEl.textContent = oob;
-            openLink.textContent = 'Copiar link recebido';
-            openLink.href = '#';
-            openLink.addEventListener('click', e=>{ e.preventDefault(); navigator.clipboard.writeText(location.href).then(()=>alert('Link copiado')); });
           });
 
         submitBtn.addEventListener('click', ()=>{
           const newPassword = newPasswordInput.value.trim();
-            const isStrongPassword = (s) => /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
-            if(!isStrongPassword(newPassword)){
-              alert('A senha deve ter pelo menos 8 caracteres, incluindo letra maiúscula, letra minúscula, número e caractere especial.');
-              return;
-            }
+          const confirmPassword = confirmPasswordInput.value.trim();
+          if(newPassword !== confirmPassword){
+            alert('As senhas não coincidem.');
+            return;
+          }
+          const isStrongPassword = (s) => /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
+          if(!isStrongPassword(newPassword)){
+            alert('A senha deve ter pelo menos 8 caracteres, incluindo letra maiúscula, letra minúscula, número e caractere especial.');
+            return;
+          }
           submitBtn.disabled = true; submitBtn.textContent = 'Confirmando…';
           confirmPasswordReset(auth, oob, newPassword)
             .then(()=>{
               info.innerHTML = '<p style="color:green">Senha alterada com sucesso. Você já pode abrir o app ou fazer login no site.</p>';
               submitBtn.style.display = 'none';
               newPasswordInput.style.display = 'none';
+              confirmPasswordInput.style.display = 'none';
             })
             .catch(err=>{
               alert('Erro ao confirmar senha: ' + (err.message||err.code));
@@ -109,10 +102,6 @@
 
       } else {
         info.innerHTML = '<p><strong>Atenção:</strong> nenhum código de redefinição (oobCode) foi encontrado no link.</p>';
-        codeEl.textContent = location.href;
-        openLink.textContent = 'Copiar link recebido';
-        openLink.href = '#';
-        openLink.addEventListener('click', function(e){ e.preventDefault(); navigator.clipboard.writeText(location.href).then(function(){ alert('Link copiado'); }); });
       }
     </script>
   </body>
