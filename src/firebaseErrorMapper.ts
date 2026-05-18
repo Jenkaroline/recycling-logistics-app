@@ -11,9 +11,9 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
   const message = (error?.message || "").toString();
 
   const map: Record<string, string> = {
-    "auth/invalid-email": "E-mail inválido.",
-    "auth/user-not-found": "Usuário não encontrado.",
-    "auth/email-already-in-use": "Este e-mail já está em uso.",
+    "auth/invalid-email": "Endereço de e‑mail inválido. Verifique e tente novamente.",
+    "auth/user-not-found": "Não encontramos uma conta com esse e‑mail.",
+    "auth/email-already-in-use": "Já existe uma conta registrada com esse e‑mail.",
     "auth/wrong-password": "Senha incorreta.",
     "auth/invalid-credential": "Credenciais inválidas.",
     "auth/invalid-custom-token": "Token inválido.",
@@ -21,6 +21,8 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
     "auth/user-token-expired": "Sessão expirada. Faça login novamente.",
     "auth/too-many-requests": "Muitas tentativas. Tente novamente mais tarde.",
     "auth/weak-password": "Senha muito fraca. Escolha uma senha mais segura.",
+    "auth/expired-action-code": "O link expirou ou é inválido. Solicite um novo e‑mail de redefinição.",
+    "auth/invalid-action-code": "O link é inválido. Solicite um novo e‑mail de redefinição.",
     "auth/requires-recent-login": "Re-autentique-se e tente novamente para realizar esta ação.",
     "auth/network-request-failed": "Erro de rede. Verifique sua conexão e tente novamente.",
     "auth/user-disabled": "Esta conta foi desativada.",
@@ -54,7 +56,7 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
   if (/requires recent login/i.test(message))
     return "Re-autentique-se e tente novamente para realizar esta ação.";
 
-  // Fallback: show a readable generic message including the original message
+  // Fallback: avoid exposing raw Firebase internals; show a friendly generic message
   const cleaned = message.replace(/^Firebase:\s*/i, "").trim();
-  return cleaned ? `Erro: ${cleaned}` : "Ocorreu um erro. Tente novamente mais tarde.";
+  return cleaned ? cleaned : "Ocorreu um erro. Tente novamente mais tarde.";
 }

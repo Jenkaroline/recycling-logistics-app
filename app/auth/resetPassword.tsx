@@ -70,7 +70,6 @@ export default function ResetPasswordScreen() {
       setError("E-mail é obrigatório!");
       return;
     }
-
     setIsSending(true);
     try {
       const redirectUrl = "https://jenkaroline.github.io/recycling-logistics-app/reset";
@@ -101,6 +100,12 @@ export default function ResetPasswordScreen() {
       showsVerticalScrollIndicator={false}
     >
       <WavesBackground dark={darkModeEnabled} />
+
+      {isSending && (
+        <View style={[styles.overlay, { backgroundColor: darkModeEnabled ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)' }]} pointerEvents="auto">
+          <ActivityIndicator size={48} color={palette.accent} />
+        </View>
+      )}
 
       <View
         style={[
@@ -141,7 +146,7 @@ export default function ResetPasswordScreen() {
 
         {statusMessage ? (
           <View style={styles.statusContainer}>
-            {!error && <ActivityIndicator color={palette.accent} />}
+            {isSending && <ActivityIndicator color={palette.accent} />}
             <Text style={[styles.statusText, { color: palette.textPrimary }]}>{statusMessage}</Text>
           </View>
         ) : null}
@@ -243,5 +248,15 @@ const styles = StyleSheet.create({
   },
   linkButton: {
     marginTop: 2,
+  },
+  overlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
   },
 });

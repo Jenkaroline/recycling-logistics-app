@@ -63,7 +63,7 @@
       const newPasswordInput = document.getElementById('newPassword');
 
       function tryOpenApp(oobCode){
-        const deep = 'projetofaculdade://reset?oobCode=' + encodeURIComponent(oobCode);
+        const deep = 'ciclo://reset?oobCode=' + encodeURIComponent(oobCode);
         openLink.href = deep;
         openLink.textContent = 'Abrir no app';
         // pequena tentativa de redirecionar ao app (pode falhar silenciosamente)
@@ -89,7 +89,11 @@
 
         submitBtn.addEventListener('click', ()=>{
           const newPassword = newPasswordInput.value.trim();
-          if(newPassword.length < 6){ alert('Senha precisa ter ao menos 6 caracteres'); return; }
+            const isStrongPassword = (s) => /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
+            if(!isStrongPassword(newPassword)){
+              alert('A senha deve ter pelo menos 8 caracteres, incluindo letra maiúscula, letra minúscula, número e caractere especial.');
+              return;
+            }
           submitBtn.disabled = true; submitBtn.textContent = 'Confirmando…';
           confirmPasswordReset(auth, oob, newPassword)
             .then(()=>{

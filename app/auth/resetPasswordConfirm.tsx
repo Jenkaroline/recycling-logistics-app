@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { StackScreenProps } from "@react-navigation/stack";
 import { verifyPasswordResetCode, confirmPasswordReset } from "firebase/auth";
@@ -17,6 +17,7 @@ export default function ResetPasswordConfirmScreen({ route, navigation }: Props)
   );
   const [email, setEmail] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -35,8 +36,17 @@ export default function ResetPasswordConfirmScreen({ route, navigation }: Props)
       setError("Código de redefinição inválido. Cole o link completo ou o código.");
       return;
     }
-    if (newPassword.length < 6) {
-      setError("A senha deve ter pelo menos 6 caracteres.");
+    const isStrongPassword = (s: string) => {
+      return /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
+    };
+    if (newPassword !== confirmPassword) {
+      setError("As senhas não coincidem!");
+      return;
+    }
+    if (!isStrongPassword(newPassword)) {
+      setError(
+        "A senha deve ter pelo menos 8 caracteres, incluindo letra maiúscula, letra minúscula, número e caractere especial."
+      );
       return;
     }
     setIsSubmitting(true);
@@ -75,9 +85,23 @@ export default function ResetPasswordConfirmScreen({ route, navigation }: Props)
         style={[styles.input, { backgroundColor: palette.inputBg }]}
       />
 
+      <TextInput
+        label="Confirmar nova senha"
+        value={confirmPassword}
+        onChangeText={(t) => setConfirmPassword(t)}
+        secureTextEntry
+        style={[styles.input, { backgroundColor: palette.inputBg }]}
+      />
+
       <Button mode="contained" onPress={handleConfirm} loading={isSubmitting} disabled={isSubmitting} buttonColor={palette.accent}>
         Atualizar senha
       </Button>
+
+      {isSubmitting && (
+        <View style={[styles.overlay, { backgroundColor: darkModeEnabled ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)' }]} pointerEvents="auto">
+          <ActivityIndicator size={48} color={palette.accent} />
+        </View>
+      )}
     </View>
   );
 }
@@ -87,4 +111,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: "800", textAlign: "center", marginBottom: 12 },
   input: { marginBottom: 12 },
   info: { textAlign: "center", marginBottom: 8 },
+  overlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
+  },
 });
