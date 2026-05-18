@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ciclo | Verificação de e-mail</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg1: #f4f8fc;
+      --bg2: #e7f3ff;
+      --card: rgba(255, 255, 255, 0.94);
+      --border: rgba(149, 175, 198, 0.3);
+      --text: #1d3750;
+      --muted: #5d748b;
+      --accent: #36a3ff;
+      --accent-soft: rgba(54, 163, 255, 0.12);
+      --success: #198754;
+      --error: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(54, 163, 255, 0.12), transparent 28%),
+        radial-gradient(circle at 82% 12%, rgba(54, 163, 255, 0.08), transparent 22%),
+        linear-gradient(180deg, var(--bg1), var(--bg2));
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .card {
+      width: min(100%, 520px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: 0 18px 50px rgba(18, 47, 76, 0.14);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+    }
+
+    .top {
+      padding: 28px 26px 18px;
+      text-align: center;
+      background: linear-gradient(180deg, rgba(54, 163, 255, 0.08), transparent);
+    }
+
+    .badge {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 14px;
+      border-radius: 22px;
+      display: grid;
+      place-items: center;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 34px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.1;
+    }
+
+    p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .content {
+      padding: 0 26px 26px;
+      text-align: center;
+    }
+
+    .status {
+      margin: 18px auto 0;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(54, 163, 255, 0.08);
+      color: var(--text);
+      text-align: left;
+    }
+
+    .status.success { background: rgba(25, 135, 84, 0.12); }
+    .status.error { background: rgba(180, 35, 24, 0.12); }
+
+    .actions {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      border-radius: 16px;
+      text-decoration: none;
+      font-weight: 700;
+      transition: transform .16s ease, opacity .16s ease;
+    }
+
+    a.button.primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    a.button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    a.button:hover { transform: translateY(-1px); }
+
+    .small {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <section class="top">
+      <div class="badge">✉</div>
+      <h1>Verificando e-mail</h1>
+      <p>Confirme sua conta para liberar o acesso ao app Ciclo.</p>
+    </section>
+
+    <section class="content">
+      <div id="status" class="status">Processando verificação...</div>
+      <div class="actions">
+        <a class="button primary" href="ciclo://verify-email">Abrir no app</a>
+        <a class="button secondary" href="/recycling-logistics-app/">Voltar ao início</a>
+      </div>
+      <div class="small">Se o app não abrir, o e-mail já foi verificado nesta página.</div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
+    import { getAuth, applyActionCode, checkActionCode } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyD0UrjUQa8FTV6_68JGxPpiotzjXMN-P4A",
+        authDomain: "recycling-logistics-app.firebaseapp.com",
+        projectId: "recycling-logistics-app",
+        storageBucket: "recycling-logistics-app.appspot.com",
+        messagingSenderId: "600023019605",
+        appId: "1:600023019605:android:d41327a559cd21488164dc"
+      };
+
+    const status = document.getElementById('status');
+    const params = new URLSearchParams(window.location.search);
+    const oobCode = params.get('oobCode') || params.get('oob');
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    const setStatus = (message, type = '') => {
+      status.textContent = message;
+      status.className = `status ${type}`.trim();
+    };
+
+    if (!oobCode) {
+      setStatus('Link inválido. Solicite um novo e-mail de verificação.', 'error');
+    } else {
+      try {
+        const info = await checkActionCode(auth, oobCode);
+        const email = info?.data?.email || '';
+        await applyActionCode(auth, oobCode);
+        setStatus(email ? `E-mail ${email} verificado com sucesso.` : 'E-mail verificado com sucesso.', 'success');
+      } catch (error) {
+        const message = error?.code === 'auth/expired-action-code' || error?.code === 'auth/invalid-action-code'
+          ? 'O link expirou ou é inválido. Solicite um novo e-mail de verificação.'
+          : 'Não foi possível concluir a verificação. Tente novamente.';
+        setStatus(message, 'error');
+      }
+    }
+  </script>
+</body>
+</html>

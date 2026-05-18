@@ -40,7 +40,7 @@ export default function RegisterScreen() {
 
   const sanitize = (s: string) => s.replace(/\s+/g, "");
 
-  const withTimeout = async <T,>(promise: Promise<T>, label: string, timeoutMs = 15000) => {
+  const withTimeout = async <T,>(promise: Promise<T>, label: string, timeoutMs = 8000) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<T>((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -162,7 +162,10 @@ export default function RegisterScreen() {
 
         setStatusMessage("Enviando confirmação por e-mail...");
         await withTimeout(
-          sendEmailVerification(userCredential.user),
+          sendEmailVerification(userCredential.user, {
+            url: "https://jenkaroline.github.io/recycling-logistics-app/action",
+            handleCodeInApp: true,
+          }),
           "Envio da confirmação por e-mail",
         );
         setStatusMessage("Indo para a verificação...");
@@ -287,7 +290,7 @@ export default function RegisterScreen() {
         {/* error shown above title now */}
         {statusMessage ? (
           <View style={styles.statusContainer}>
-            {!error && <ActivityIndicator color={palette.accent} />}
+            {!error && !isRegistering && <ActivityIndicator color={palette.accent} />}
             <Text style={[styles.statusText, { color: palette.textPrimary }]}>{statusMessage}</Text>
           </View>
         ) : null}

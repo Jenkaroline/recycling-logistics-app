@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Ciclo — Ação de e-mail</title>
+    <style>
+      body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f4f8fc; color: #102a40; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:24px; }
+      .card { max-width: 560px; width:100%; background:#fff; padding:24px; border-radius:16px; box-shadow:0 8px 28px rgba(0,0,0,.12); }
+      h1 { margin:0 0 8px; font-size:24px; }
+      p { margin:8px 0; line-height:1.5; color:#4f647a; }
+      .hint { margin-top:16px; font-size:13px; color:#5d748b; }
+      code { background:#f0f6fb; padding:2px 6px; border-radius:6px; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Processando ação...</h1>
+      <p id="message">Redirecionando a ação do e-mail.</p>
+      <p class="hint">Se esta página não redirecionar, use o link do e-mail novamente.</p>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const mode = (params.get('mode') || '').toLowerCase();
+      const oobCode = params.get('oobCode');
+      const base = 'https://jenkaroline.github.io/recycling-logistics-app';
+
+      const target = (() => {
+        if (mode === 'resetpassword') {
+          return `${base}/reset/?${params.toString()}`;
+        }
+        if (mode === 'verifyemail') {
+          return `${base}/verify/?${params.toString()}`;
+        }
+        return `${base}/`;
+      })();
+
+      if (!oobCode) {
+        document.getElementById('message').textContent = 'Este link não tem um código de ação válido.';
+      } else {
+        document.getElementById('message').textContent = `Direcionando para ${mode || 'a ação correta'}...`;
+        setTimeout(() => {
+          window.location.replace(target);
+        }, 250);
+      }
+    </script>
+  </body>
+</html>

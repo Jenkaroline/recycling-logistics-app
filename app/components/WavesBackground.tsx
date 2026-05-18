@@ -9,22 +9,22 @@ type Props = {
 
 export default function WavesBackground({ dark = false, style }: Props) {
   const { width } = useWindowDimensions();
-  const height = Math.min(380, Math.max(200, Math.round(width * 0.44)));
+  const height = Math.min(680, Math.max(300, Math.round(width * 0.8)));
 
   const color1 = dark ? "#0b2a43" : "#eaf6ff";
   const color2 = dark ? "#08324a" : "#d7eefc";
 
   return (
-    <View pointerEvents="none" style={[styles.container, { height, transform: [{ translateY: -12 }] }, style]}>
+    <View pointerEvents="none" style={[styles.container, { height, transform: [{ translateY: -40 }] }, style]}>
       <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <Defs>
           <LinearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
-            <Stop offset="0" stopColor={color1} stopOpacity="0.20" />
-            <Stop offset="1" stopColor={color2} stopOpacity="0.10" />
+            <Stop offset="0" stopColor={color1} stopOpacity="0.28" />
+            <Stop offset="1" stopColor={color2} stopOpacity="0.16" />
           </LinearGradient>
           <LinearGradient id="g2" x1="0" x2="0" y1="0" y2="1">
-            <Stop offset="0" stopColor={color2} stopOpacity="0.14" />
-            <Stop offset="1" stopColor={color1} stopOpacity="0.06" />
+            <Stop offset="0" stopColor={color2} stopOpacity="0.18" />
+            <Stop offset="1" stopColor={color1} stopOpacity="0.10" />
           </LinearGradient>
         </Defs>
 
@@ -40,7 +40,7 @@ export default function WavesBackground({ dark = false, style }: Props) {
 
         <Path
           d={`M0 ${height * 0.9} C ${width * 0.15} ${height * 0.72}, ${width * 0.45} ${height * 1.02}, ${width} ${height * 0.9} L ${width} 0 L 0 0 Z`}
-          fill={dark ? "rgba(8,50,70,0.03)" : "rgba(54,163,255,0.04)"}
+          fill={dark ? "rgba(8,50,70,0.06)" : "rgba(54,163,255,0.06)"}
         />
       </Svg>
     </View>

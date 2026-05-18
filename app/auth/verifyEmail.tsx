@@ -3,7 +3,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { deleteUser, reload, sendEmailVerification } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
-import { Image } from "expo-image";
+// using Ionicons for the hero icon instead of the app logo
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Button } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -65,12 +65,19 @@ export default function VerifyEmailScreen() {
   const heroSize = width < 360 ? 126 : width < 420 ? 142 : 158;
   const heroImageSize = width < 360 ? 106 : width < 420 ? 120 : 134;
   const adjustedHeroImageSize = Math.min(160, Math.round(cardWidth * 0.45));
+  const resendButtonColor = darkModeEnabled ? "rgba(91, 183, 255, 0.18)" : "rgba(54, 163, 255, 0.10)";
+  const resendButtonTextColor = darkModeEnabled ? "#cbe7ff" : palette.textSecondary;
+  const resendButtonLockedColor = darkModeEnabled ? "rgba(91, 183, 255, 0.12)" : "rgba(54, 163, 255, 0.08)";
+  const resendButtonLockedTextColor = darkModeEnabled ? "#9fcdf5" : palette.textSecondary;
 
   const handleSendVerification = async () => {
     setError("");
     if (user) {
       try {
-        await sendEmailVerification(user);
+        await sendEmailVerification(user, {
+          url: "https://jenkaroline.github.io/recycling-logistics-app/action",
+          handleCodeInApp: true,
+        });
         setEmailSent(true);
         setCanResend(false);
         setResendTimer(60);
@@ -176,14 +183,9 @@ export default function VerifyEmailScreen() {
           { backgroundColor: palette.cardBg, borderColor: palette.cardBorder, width: cardWidth, zIndex: 2 },
         ]}
       >
-          <View style={[styles.heroWrap, { marginBottom: error ? 12 : -Math.round(adjustedHeroImageSize * 0.12) }]}>
-          <View style={[styles.heroFrame, { backgroundColor: palette.accentSoft }]}>
-            <Image
-              source={require("../../assets/images/icon.png")}
-              style={[styles.heroImage, { width: adjustedHeroImageSize, height: adjustedHeroImageSize }]}
-              contentFit="contain"
-              transition={180}
-            />
+          <View style={[styles.heroWrap, { marginBottom: error ? 12 : 18 }]}>
+          <View style={[styles.heroFrame, { backgroundColor: 'transparent' }]}>
+            <Ionicons name="mail" size={adjustedHeroImageSize} color={palette.accent} />
           </View>
         </View>
 
@@ -224,14 +226,15 @@ export default function VerifyEmailScreen() {
             </Button>
 
             <Button
-              mode="outlined"
-              textColor={palette.textPrimary}
-              onPress={handleSendVerification}
-              disabled={!canResend}
-              style={[styles.secondaryButton, { borderColor: palette.cardBorder }]}
+              mode="contained"
+              buttonColor={canResend ? resendButtonColor : resendButtonLockedColor}
+              textColor={canResend ? resendButtonTextColor : resendButtonLockedTextColor}
+              onPress={canResend ? handleSendVerification : undefined}
+              accessibilityState={{ disabled: !canResend }}
+              style={[styles.secondaryButton, { borderColor: darkModeEnabled ? "rgba(91, 183, 255, 0.28)" : palette.cardBorder }]}
               contentStyle={styles.secondaryButtonContent}
             >
-              Reenviar e-mail
+              {canResend ? "Reenviar e-mail" : "Aguarde para reenviar"}
             </Button>
 
             {!canResend && resendTimer > 0 ? (
@@ -329,6 +332,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     borderRadius: 18,
     borderWidth: 1,
+    elevation: 0,
   },
   secondaryButtonContent: {
     height: 42,
