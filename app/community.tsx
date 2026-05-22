@@ -1,12 +1,16 @@
 import React, { useMemo } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { useDrawerStatus } from "@react-navigation/drawer";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReactionType, useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 
@@ -17,6 +21,10 @@ const EMOJI_REACTIONS: { key: ReactionType; emoji: string }[] = [
 ];
 
 export default function CommunityScreen() {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const drawerStatus = useDrawerStatus();
+  const drawerOpen = drawerStatus === "open";
   const { followingFeedPosts, currentProfile, loading, reactToPost } =
     useSocial();
   const { darkModeEnabled } = useThemePreference();
@@ -52,11 +60,93 @@ export default function CommunityScreen() {
   );
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: palette.bg }}>
-      <View style={{ padding: 20 }}>
-        <Text style={{ color: palette.textSecondary, marginBottom: 14 }}>
-          Conquistas compartilhadas pelos seus amigos.
-        </Text>
+    <View style={{ flex: 1, backgroundColor: palette.bg }}>
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
+        <View style={{ height: insets.top + 10 }} />
+        <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <TouchableOpacity
+            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.panelAlt,
+            }}
+          >
+            <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate("Notificações")}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.panelAlt,
+            }}
+          >
+            <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView style={{ flex: 1, backgroundColor: palette.bg }} contentContainerStyle={{ paddingTop: insets.top + 64 }}>
+        <View style={{ padding: 20 }}>
+        <View
+          style={{
+            backgroundColor: palette.panel,
+            borderRadius: 28,
+            padding: 18,
+            borderWidth: 1,
+            borderColor: palette.panelAlt,
+            marginBottom: 18,
+            overflow: "hidden",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+            <View style={{ flex: 1, paddingTop: 2 }}>
+              <View
+                style={{
+                  alignSelf: "flex-start",
+                  backgroundColor: darkModeEnabled ? "rgba(54, 163, 255, 0.14)" : "rgba(31, 111, 178, 0.10)",
+                  borderWidth: 1,
+                  borderColor: darkModeEnabled ? "rgba(54, 163, 255, 0.32)" : "rgba(31, 111, 178, 0.18)",
+                  borderRadius: 999,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  marginBottom: 12,
+                }}
+              >
+                <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>
+                  COMUNIDADE
+                </Text>
+              </View>
+
+              <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 0.8, marginBottom: 6, fontWeight: "700" }}>
+                CONQUISTAS COMPARTILHADAS
+              </Text>
+              <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 32, fontWeight: "900" }}>
+                Amigos em movimento
+              </Text>
+              <Text style={{ color: palette.textSecondary, marginTop: 8, fontSize: 13 }}>
+                {friendsPosts.length} atualização(ões) prontas para inspirar a sua próxima meta.
+              </Text>
+            </View>
+
+            <View style={{ width: 132, height: 132, borderRadius: 34, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.panelAlt, overflow: "hidden" }}>
+              <Image source={require("../assets/images/criancas-planeta.png")} style={{ width: 112, height: 112 }} />
+            </View>
+          </View>
+        </View>
 
         {loading ? (
           <ActivityIndicator
@@ -161,5 +251,6 @@ export default function CommunityScreen() {
         )}
       </View>
     </ScrollView>
+    </View>
   );
 }

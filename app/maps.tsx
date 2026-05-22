@@ -3,15 +3,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useDrawerStatus } from "@react-navigation/drawer";
 import MapView, { Marker, Region } from "react-native-maps";
 import { Button } from "react-native-paper";
 import { useThemePreference } from "../src/ThemePreferenceContext";
@@ -454,6 +459,10 @@ async function fetchRealCollectionPoints(
 }
 
 export default function MapsScreen() {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const drawerStatus = useDrawerStatus();
+  const drawerOpen = drawerStatus === "open";
   const { darkModeEnabled } = useThemePreference();
   const colors = darkModeEnabled ? COLORS : LIGHT_COLORS;
   const [locationSharingEnabled, setLocationSharingEnabled] = useState(true);
@@ -786,9 +795,96 @@ export default function MapsScreen() {
   );
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
+        <View style={{ height: insets.top + 10 }} />
+        <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <TouchableOpacity
+            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: colors.panel,
+              borderWidth: 1,
+              borderColor: colors.panelAlt,
+            }}
+          >
+            <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate("Notificações")}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: colors.panel,
+              borderWidth: 1,
+              borderColor: colors.panelAlt,
+            }}
+          >
+            <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
+          </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={{ paddingTop: insets.top + 64 }}
+      >
+      <View
+        style={{
+          marginBottom: 18,
+          backgroundColor: colors.panel,
+          borderRadius: 28,
+          padding: 18,
+          borderWidth: 1,
+          borderColor: colors.panelAlt,
+          overflow: "hidden",
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+          <View style={{ flex: 1, paddingTop: 2 }}>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                backgroundColor: darkModeEnabled ? "rgba(54, 163, 255, 0.14)" : "rgba(31, 111, 178, 0.10)",
+                borderWidth: 1,
+                borderColor: darkModeEnabled ? "rgba(54, 163, 255, 0.32)" : "rgba(31, 111, 178, 0.18)",
+                borderRadius: 999,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>
+                MAPAS
+              </Text>
+            </View>
+
+            <Text style={{ color: colors.textSecondary, fontSize: 12, letterSpacing: 0.8, marginBottom: 6, fontWeight: "700" }}>
+              PONTOS DE RECICLAGEM
+            </Text>
+            <Text style={{ color: colors.heading, fontSize: 28, lineHeight: 32, fontWeight: "900" }}>
+              {selectedCoords ? `${selectedRegionPoints.length} pontos na seleção` : `${nearbyPoints.length} pontos próximos`}
+            </Text>
+            <Text style={{ color: colors.textSecondary, marginTop: 8, fontSize: 13 }}>
+              Toque no mapa, filtre por raio e abra a rota para o ecoponto ideal.
+            </Text>
+          </View>
+
+          <View style={{ width: 132, height: 132, borderRadius: 34, backgroundColor: colors.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.panelAlt, overflow: "hidden" }}>
+            <Image source={require("../assets/images/polvo.png")} style={{ width: 112, height: 112 }} />
+          </View>
+        </View>
+      </View>
+
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         {permissionText}
       </Text>
@@ -1093,7 +1189,8 @@ export default function MapsScreen() {
           disponibilidade na região.
         </Text>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

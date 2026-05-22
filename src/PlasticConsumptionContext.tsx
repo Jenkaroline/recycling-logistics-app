@@ -7,6 +7,8 @@ import React, {
   useRef,
     useState,
 } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../service/firebaseConfig";
 
 const STORAGE_KEY = "plastic-consumption-entries-v1";
 
@@ -42,32 +44,50 @@ export function PlasticConsumptionProvider({
 }) {
   const [entries, setEntries] = useState<PlasticEntry[]>([]);
   const entriesRef = useRef<PlasticEntry[]>([]);
+  const currentUidRef = useRef<string | null>(auth.currentUser?.uid || null);
 
   useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
 
   useEffect(() => {
-    const loadEntries = async () => {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
+    const loadEntriesForUid = async (uid: string | null) => {
+      const perKey = uid ? `${STORAGE_KEY}-${uid}` : STORAGE_KEY;
       try {
-        const parsed = JSON.parse(raw) as PlasticEntry[];
-        setEntries(parsed);
+        const rawPer = await AsyncStorage.getItem(perKey);
+        if (rawPer) {
+          setEntries(JSON.parse(rawPer) as PlasticEntry[]);
+          return;
+        }
+
+        // Do NOT auto-migrate global/device entries into a newly created user account.
+        // If there's no per-user data, start with an empty history for this account.
+        setEntries([]);
       } catch {
         setEntries([]);
       }
     };
 
-    void loadEntries();
+    // initial load
+    void loadEntriesForUid(auth.currentUser?.uid || null);
+
+    // listen for auth changes and reload accordingly
+    const unsub = onAuthStateChanged(auth, (u) => {
+      currentUidRef.current = u?.uid || null;
+      void loadEntriesForUid(u?.uid || null);
+    });
+
+    return () => {
+      unsub();
+    };
   }, []);
 
   const persist = async (nextEntries: PlasticEntry[]) => {
     entriesRef.current = nextEntries;
     setEntries(nextEntries);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries));
+    const uid = currentUidRef.current;
+    const perKey = uid ? `${STORAGE_KEY}-${uid}` : STORAGE_KEY;
+    await AsyncStorage.setItem(perKey, JSON.stringify(nextEntries));
   };
 
   const addEntry = async (

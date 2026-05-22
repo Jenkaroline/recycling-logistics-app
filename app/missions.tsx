@@ -1,13 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Alert,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { useDrawerStatus } from "@react-navigation/drawer";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "react-native-paper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
@@ -26,6 +31,10 @@ function clamp(value: number) {
 }
 
 export default function MissionsScreen() {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const drawerStatus = useDrawerStatus();
+  const drawerOpen = drawerStatus === "open";
   const { entries, totalGrams } = usePlasticConsumption();
   const { shareAchievement } = useSocial();
   const { darkModeEnabled } = useThemePreference();
@@ -237,7 +246,93 @@ export default function MissionsScreen() {
       };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: palette.bg }]}>
+    <View style={{ flex: 1, backgroundColor: palette.bg }}>
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
+        <View style={{ height: insets.top + 10 }} />
+        <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <TouchableOpacity
+            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.border,
+            }}
+          >
+            <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate("Notificações")}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.border,
+            }}
+          >
+            <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView style={[styles.container, { backgroundColor: palette.bg }]} contentContainerStyle={{ paddingTop: insets.top + 64 }}>
+      <View
+        style={{
+          marginBottom: 18,
+          backgroundColor: palette.panel,
+          borderRadius: 28,
+          padding: 18,
+          borderWidth: 1,
+          borderColor: palette.border,
+          overflow: "hidden",
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+          <View style={{ flex: 1, paddingTop: 2 }}>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                backgroundColor: darkModeEnabled ? "rgba(54, 163, 255, 0.14)" : "rgba(31, 111, 178, 0.10)",
+                borderWidth: 1,
+                borderColor: darkModeEnabled ? "rgba(54, 163, 255, 0.32)" : "rgba(31, 111, 178, 0.18)",
+                borderRadius: 999,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>
+                MISSÕES
+              </Text>
+            </View>
+
+            <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 0.8, marginBottom: 6, fontWeight: "700" }}>
+              DESAFIOS EM ANDAMENTO
+            </Text>
+            <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 32, fontWeight: "900" }}>
+              Evolua com constância
+            </Text>
+            <Text style={{ color: palette.textSecondary, marginTop: 8, fontSize: 13 }}>
+              {completedMissions}/{missions.length} metas concluídas e {totalGrams.toFixed(0)}g acumulados.
+            </Text>
+          </View>
+
+          <View style={{ width: 132, height: 132, borderRadius: 34, backgroundColor: palette.border, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.border, overflow: "hidden" }}>
+            <Image source={require("../assets/images/planeta.png")} style={{ width: 112, height: 112 }} />
+          </View>
+        </View>
+      </View>
+
       <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
         Complete as metas e acompanhe sua evolução no consumo de plástico.
       </Text>
@@ -428,6 +523,7 @@ export default function MissionsScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </View>
   );
 }
 
