@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
     createContext,
     useContext,
@@ -8,9 +7,20 @@ import React, {
     useState,
 } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../service/firebaseConfig";
-
-const STORAGE_KEY = "plastic-consumption-entries-v1";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  Timestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
+import { auth, db } from "../service/firebaseConfig";
+import { recordAuditEvent } from "./auditLogger";
 
 export type PlasticEntry = {
   id: string;
@@ -27,6 +37,8 @@ type PlasticConsumptionContextValue = {
     amountGrams: number,
     category?: { name: string; icon?: string },
   ) => Promise<void>;
+  goalGrams: number | null;
+  setGoal: (g: number | null) => Promise<void>;
   updateEntry: (
     id: string,
     payload: { amountGrams: number; categoryName?: string },
@@ -37,98 +49,173 @@ type PlasticConsumptionContextValue = {
 const PlasticConsumptionContext =
   createContext<PlasticConsumptionContextValue | null>(null);
 
+function normalizeEntry(entry: PlasticEntry & { createdAt?: unknown }): PlasticEntry {
+  const createdAt = entry.createdAt;
+
+  return {
+    ...entry,
+    amountGrams: Number(entry.amountGrams || 0),
+    createdAt:
+      typeof createdAt === "string"
+        ? createdAt
+        : createdAt instanceof Timestamp
+          ? createdAt.toDate().toISOString()
+          : new Date().toISOString(),
+  };
+}
+
 export function PlasticConsumptionProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const [entries, setEntries] = useState<PlasticEntry[]>([]);
-  const entriesRef = useRef<PlasticEntry[]>([]);
+  const [goalGrams, setGoalGrams] = useState<number | null>(null);
   const currentUidRef = useRef<string | null>(auth.currentUser?.uid || null);
 
   useEffect(() => {
-    entriesRef.current = entries;
-  }, [entries]);
+    let unsubscribeEntries: (() => void) | null = null;
+    let unsubscribeGoal: (() => void) | null = null;
 
-  useEffect(() => {
-    const loadEntriesForUid = async (uid: string | null) => {
-      const perKey = uid ? `${STORAGE_KEY}-${uid}` : STORAGE_KEY;
-      try {
-        const rawPer = await AsyncStorage.getItem(perKey);
-        if (rawPer) {
-          setEntries(JSON.parse(rawPer) as PlasticEntry[]);
+    const bindForUid = (uid: string | null) => {
+      if (unsubscribeEntries) {
+        unsubscribeEntries();
+        unsubscribeEntries = null;
+      }
+      if (unsubscribeGoal) {
+        unsubscribeGoal();
+        unsubscribeGoal = null;
+      }
+
+      if (!uid) {
+        setEntries([]);
+        setGoalGrams(null);
+        return;
+      }
+
+      const entriesQuery = query(
+        collection(db, "users", uid, "plasticConsumptionEntries"),
+        orderBy("createdAt", "desc"),
+      );
+      unsubscribeEntries = onSnapshot(entriesQuery, (snapshot) => {
+        setEntries(
+          snapshot.docs.map((snap) =>
+            normalizeEntry({
+              id: snap.id,
+              ...(snap.data() as Omit<PlasticEntry, "id">),
+            }),
+          ),
+        );
+      });
+
+      const goalRef = doc(db, "users", uid, "plasticConsumptionMeta", "goal");
+      unsubscribeGoal = onSnapshot(goalRef, (snapshot) => {
+        if (!snapshot.exists()) {
+          setGoalGrams(null);
           return;
         }
 
-        // Do NOT auto-migrate global/device entries into a newly created user account.
-        // If there's no per-user data, start with an empty history for this account.
-        setEntries([]);
-      } catch {
-        setEntries([]);
-      }
+        const nextGoal = Number(snapshot.data().goalGrams);
+        setGoalGrams(Number.isNaN(nextGoal) ? null : nextGoal);
+      });
     };
 
-    // initial load
-    void loadEntriesForUid(auth.currentUser?.uid || null);
-
-    // listen for auth changes and reload accordingly
+    bindForUid(auth.currentUser?.uid || null);
     const unsub = onAuthStateChanged(auth, (u) => {
       currentUidRef.current = u?.uid || null;
-      void loadEntriesForUid(u?.uid || null);
+      bindForUid(u?.uid || null);
     });
 
     return () => {
       unsub();
+      if (unsubscribeEntries) unsubscribeEntries();
+      if (unsubscribeGoal) unsubscribeGoal();
     };
   }, []);
 
-  const persist = async (nextEntries: PlasticEntry[]) => {
-    entriesRef.current = nextEntries;
-    setEntries(nextEntries);
+  const persistGoal = async (g: number | null) => {
+    setGoalGrams(g);
     const uid = currentUidRef.current;
-    const perKey = uid ? `${STORAGE_KEY}-${uid}` : STORAGE_KEY;
-    await AsyncStorage.setItem(perKey, JSON.stringify(nextEntries));
+    if (!uid) return;
+
+    const goalRef = doc(db, "users", uid, "plasticConsumptionMeta", "goal");
+    if (g === null) {
+      await deleteDoc(goalRef);
+    } else {
+      await setDoc(
+        goalRef,
+        {
+          goalGrams: g,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+    void recordAuditEvent({
+      eventType: "goal_set",
+      resourceType: "plastic_consumption",
+      resourceId: uid || null,
+      payload: { goalGrams: g },
+    });
   };
 
   const addEntry = async (
     amountGrams: number,
     category?: { name: string; icon?: string },
   ) => {
-    const currentEntries = entriesRef.current;
-    const next: PlasticEntry[] = [
-      {
-        id: `${Date.now()}`,
+    const entryId = `${Date.now()}`;
+    const uid = currentUidRef.current;
+    if (!uid) return;
+
+    await setDoc(doc(db, "users", uid, "plasticConsumptionEntries", entryId), {
+      amountGrams: Number(amountGrams.toFixed(2)),
+      createdAt: serverTimestamp(),
+      categoryName: category?.name || null,
+      categoryIcon: category?.icon || null,
+    });
+    void recordAuditEvent({
+      eventType: "create",
+      resourceType: "plastic_consumption",
+      resourceId: entryId,
+      payload: {
         amountGrams: Number(amountGrams.toFixed(2)),
-        createdAt: new Date().toISOString(),
-        categoryName: category?.name,
-        categoryIcon: category?.icon,
+        categoryName: category?.name || null,
       },
-      ...currentEntries,
-    ];
-    await persist(next);
+    });
   };
 
   const updateEntry = async (
     id: string,
     payload: { amountGrams: number; categoryName?: string },
   ) => {
-    const currentEntries = entriesRef.current;
-    const next = currentEntries.map((entry) =>
-      entry.id === id
-        ? {
-            ...entry,
-            amountGrams: Number(payload.amountGrams.toFixed(2)),
-            categoryName: payload.categoryName,
-          }
-        : entry,
-    );
-    await persist(next);
+    const uid = currentUidRef.current;
+    if (!uid) return;
+
+    await updateDoc(doc(db, "users", uid, "plasticConsumptionEntries", id), {
+      amountGrams: Number(payload.amountGrams.toFixed(2)),
+      categoryName: payload.categoryName || null,
+    });
+    void recordAuditEvent({
+      eventType: "update",
+      resourceType: "plastic_consumption",
+      resourceId: id,
+      payload: {
+        amountGrams: Number(payload.amountGrams.toFixed(2)),
+        categoryName: payload.categoryName || null,
+      },
+    });
   };
 
   const deleteEntry = async (id: string) => {
-    const currentEntries = entriesRef.current;
-    const next = currentEntries.filter((entry) => entry.id !== id);
-    await persist(next);
+    const uid = currentUidRef.current;
+    if (!uid) return;
+
+    await deleteDoc(doc(db, "users", uid, "plasticConsumptionEntries", id));
+    void recordAuditEvent({
+      eventType: "delete",
+      resourceType: "plastic_consumption",
+      resourceId: id,
+    });
   };
 
   const totalGrams = useMemo(
@@ -138,7 +225,7 @@ export function PlasticConsumptionProvider({
 
   return (
     <PlasticConsumptionContext.Provider
-      value={{ entries, totalGrams, addEntry, updateEntry, deleteEntry }}
+      value={{ entries, totalGrams, goalGrams, setGoal: persistGoal, addEntry, updateEntry, deleteEntry }}
     >
       {children}
     </PlasticConsumptionContext.Provider>

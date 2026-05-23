@@ -5,11 +5,12 @@ import {
   DrawerItem,
 } from "@react-navigation/drawer";
 import { DrawerActions } from "@react-navigation/native";
+import { onAuthStateChanged } from "firebase/auth";
 import { useSocial } from "../src/SocialContext";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { Image } from "react-native";
 
-import MapsScreen from "@/app/maps";
+import MapsScreen from "./maps";
 import { Ionicons } from "@expo/vector-icons";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { signOut } from "firebase/auth";
@@ -19,6 +20,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../service/firebaseConfig";
 import { PlasticCategoriesProvider } from "../src/PlasticCategoriesContext";
 import { PlasticConsumptionProvider } from "../src/PlasticConsumptionContext";
+import { RecyclingCompetitionProvider } from "../src/RecyclingCompetitionContext";
+import { RecyclingProvider } from "../src/RecyclingContext";
+import { RecyclingTypesProvider } from "../src/RecyclingTypesContext";
 import { SocialProvider } from "../src/SocialContext";
 import {
   ThemePreferenceProvider,
@@ -30,9 +34,8 @@ import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
 import ResetPasswordScreen from "./auth/resetPassword";
 import ResetPasswordConfirmScreen from "./auth/resetPasswordConfirm";
-import CommunityScreen from "./community";
+import MeusGruposScreen from "./myGroups";
 import HomeScreen from "./home";
-import MissionsScreen from "./missions";
 import RecordsScreen from "./records";
 import NotificationsScreen from "./notifications";
 import SettingsScreen from "./settings";
@@ -106,9 +109,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           {currentProfile?.avatarUrl ? (
             <Image source={{ uri: currentProfile.avatarUrl }} style={{ width: 56, height: 56, borderRadius: 12 }} />
           ) : (
-            <View style={{ width: 56, height: 56, borderRadius: 12, backgroundColor: palette.header, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{(currentProfile?.username || "U").charAt(0).toUpperCase()}</Text>
-            </View>
+            <Image source={require("../assets/images/logo-ciclo.png")} style={{ width: 56, height: 56, borderRadius: 12 }} />
           )}
           <View style={{ flex: 1 }}>
             <Text style={{ color: palette.textPrimary, fontSize: 16, fontWeight: "800" }}>{currentProfile?.username || "Você"}</Text>
@@ -130,16 +131,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           activeBackgroundColor={palette.activeBg}
           labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
           style={{ borderRadius: 10, marginBottom: 6 }}
-        />
-
-        <DrawerItem
-          label="Missões"
-          onPress={() => openMainScreen("Missões")}
-          activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.iconInactive}
-          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
-          style={{ borderRadius: 10, marginBottom: 6 }}
-          icon={({ color, size }) => <Ionicons name="flag-outline" size={size} color={color || palette.iconInactive} />}
         />
 
         <DrawerItem
@@ -165,13 +156,13 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 
       <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: palette.header, paddingTop: 8, paddingHorizontal: 8 }}>
         <DrawerItem
-          label="Amigos"
-          onPress={() => (props.navigation as any).navigate("Amigos")}
+          label="Meus grupos"
+          onPress={() => (props.navigation as any).navigate("MeusGrupos")}
           activeTintColor={palette.textAccent}
           inactiveTintColor={palette.iconInactive}
           labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
           style={{ borderRadius: 10, marginBottom: 6 }}
-          icon={({ color, size }) => <Ionicons name="people-outline" size={size} color={color || palette.iconInactive} />}
+          icon={({ color, size }) => <Ionicons name="trophy-outline" size={size} color={color || palette.iconInactive} />}
         />
 
         <DrawerItem
@@ -209,6 +200,7 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
                 text: "Sair",
                 style: "destructive",
                 onPress: async () => {
+                  props.navigation.closeDrawer();
                   await signOut(auth);
                   props.navigation.reset({ index: 0, routes: [{ name: "Login" }] });
                 },
@@ -250,6 +242,7 @@ function AppDrawer() {
       screenOptions={{
         headerShown: false,
         drawerType: "back",
+        swipeEnabled: false,
         overlayColor: "transparent",
         drawerLabelStyle: {
           color: palette.drawerText,
@@ -264,7 +257,6 @@ function AppDrawer() {
       drawerContent={(props) => <CustomDrawerContent {...props} />}
     >
       <Drawer.Screen name="Home" component={HomeScreen} options={{ title: "Home", drawerItemStyle: { display: "none" } }} />
-      <Drawer.Screen name="Missões" component={MissionsScreen} options={{ title: "Missões", drawerItemStyle: { display: "none" } }} />
       <Drawer.Screen name="Estatísticas" component={StatisticsScreen} options={{ title: "Estatísticas", drawerItemStyle: { display: "none" } }} />
       <Drawer.Screen name="Mapas" component={MapsScreen} options={{ title: "Mapas", drawerItemStyle: { display: "none" } }} />
       <Drawer.Screen
@@ -276,10 +268,10 @@ function AppDrawer() {
         }}
       />
       <Drawer.Screen
-        name="Amigos"
-        component={CommunityScreen}
+        name="MeusGrupos"
+        component={MeusGruposScreen}
         options={{
-          title: "Amigos",
+          title: "Meus grupos",
           drawerItemStyle: { display: "none" },
         }}
       />
@@ -304,45 +296,55 @@ function AppDrawer() {
   );
 }
 
+function AuthenticatedApp() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+function AuthScreens() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="ResetPasswordConfirm"
+        component={ResetPasswordConfirmScreen}
+        options={{ headerShown: false }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 export default function MainNavigator() {
   return (
     <ThemePreferenceProvider>
       <PlasticCategoriesProvider>
         <PlasticConsumptionProvider>
-          <SocialProvider>
-            <Stack.Navigator screenOptions={{ headerShown: false }}>
-              <Stack.Screen
-                name="Login"
-                component={LoginScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="Register"
-                component={RegisterScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="VerifyEmail"
-                component={VerifyEmailScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="ResetPassword"
-                component={ResetPasswordScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="ResetPasswordConfirm"
-                component={ResetPasswordConfirmScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="Main"
-                component={AppDrawer}
-                options={{ headerShown: false }}
-              />
-            </Stack.Navigator>
-          </SocialProvider>
+          <RecyclingProvider>
+            <RecyclingTypesProvider>
+              <RecyclingCompetitionProvider>
+                <SocialProvider>
+                  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
+                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+                    <Stack.Screen
+                      name="ResetPasswordConfirm"
+                      component={ResetPasswordConfirmScreen}
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+                  </Stack.Navigator>
+                </SocialProvider>
+              </RecyclingCompetitionProvider>
+            </RecyclingTypesProvider>
+          </RecyclingProvider>
         </PlasticConsumptionProvider>
       </PlasticCategoriesProvider>
     </ThemePreferenceProvider>
