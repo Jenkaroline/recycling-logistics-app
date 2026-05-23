@@ -1,5 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { auth, db } from "../service/firebaseConfig";
 
 const CATEGORIES_STORAGE_KEY = "plastic-categories-v1";
 
@@ -32,7 +35,7 @@ const DEFAULT_CATEGORIES: PlasticCategory[] = [
     id: "2",
     name: "Garrafa PET",
     weightGrams: 30,
-    icon: "bottle-water-outline",
+    icon: "bottle-soda-outline",
     isCustom: false,
   },
   {
@@ -46,14 +49,14 @@ const DEFAULT_CATEGORIES: PlasticCategory[] = [
     id: "4",
     name: "Embalagem Comida",
     weightGrams: 15,
-    icon: "package-variant-outline",
+    icon: "package-variant-closed",
     isCustom: false,
   },
   {
     id: "5",
     name: "Canudo Plástico",
     weightGrams: 1,
-    icon: "straw",
+    icon: "cup-straw-outline",
     isCustom: false,
   },
   {
@@ -67,14 +70,14 @@ const DEFAULT_CATEGORIES: PlasticCategory[] = [
     id: "7",
     name: "Cd/DVD",
     weightGrams: 15,
-    icon: "disc-outline",
+    icon: "compact-disc",
     isCustom: false,
   },
   {
     id: "8",
     name: "Capa Fone",
     weightGrams: 3,
-    icon: "headphones-outline",
+    icon: "headphones",
     isCustom: false,
   },
 ];
@@ -88,43 +91,147 @@ export function PlasticCategoriesProvider({
     useState<PlasticCategory[]>(DEFAULT_CATEGORIES);
 
   useEffect(() => {
-    const loadCategories = async () => {
-      const raw = await AsyncStorage.getItem(CATEGORIES_STORAGE_KEY);
-      if (raw) {
+    let unsubscribeCategories = () => {};
+    let isActive = true;
+
+    const bindForUser = async (uid: string | null) => {
+      unsubscribeCategories();
+      setCategories(DEFAULT_CATEGORIES);
+
+      if (!uid) {
+        return;
+      }
+
+      const legacyRaw = await AsyncStorage.getItem(CATEGORIES_STORAGE_KEY);
+      if (legacyRaw) {
         try {
-          const parsed = JSON.parse(raw) as PlasticCategory[];
-          setCategories([
-            ...DEFAULT_CATEGORIES,
-            ...parsed.filter((c) => c.isCustom),
-          ]);
+          const parsed = JSON.parse(legacyRaw) as PlasticCategory[];
+          await Promise.all(
+            parsed
+              .filter((category) => category.isCustom)
+              .map((category) =>
+                setDoc(
+                  doc(db, "users", uid, "plasticCategories", category.id),
+                  {
+                    ...category,
+                    createdAt: serverTimestamp(),
+                  },
+                  { merge: true },
+                ),
+              ),
+          );
+          await AsyncStorage.removeItem(CATEGORIES_STORAGE_KEY);
         } catch {
-          setCategories(DEFAULT_CATEGORIES);
+          // Ignore migration failures and fall back to Firestore state.
         }
       }
+
+      if (!isActive) {
+        return;
+      }
+
+      const categoriesQuery = query(
+        collection(db, "users", uid, "plasticCategories"),
+        orderBy("createdAt", "asc"),
+      );
+
+      unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
+        const customCategories = snapshot.docs.map((categorySnap) => {
+          const data = categorySnap.data() as Partial<PlasticCategory>;
+          return {
+            id: categorySnap.id,
+            name: data.name || "",
+            weightGrams: Number(data.weightGrams || 0),
+            icon: data.icon || "shape-outline",
+            isCustom: true,
+          };
+        });
+
+        setCategories([...DEFAULT_CATEGORIES, ...customCategories]);
+      });
     };
 
-    void loadCategories();
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      void bindForUser(user?.uid || null);
+    });
+
+    void bindForUser(auth.currentUser?.uid || null);
+
+    return () => {
+      isActive = false;
+      unsubscribeCategories();
+      unsubscribeAuth();
+    };
   }, []);
 
   const persist = async (nextCategories: PlasticCategory[]) => {
-    const customOnly = nextCategories.filter((c) => c.isCustom);
-    await AsyncStorage.setItem(
-      CATEGORIES_STORAGE_KEY,
-      JSON.stringify(customOnly),
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      throw new Error("Usuário não autenticado.");
+    }
+
+    const existingCustomIds = new Set(
+      categories.filter((category) => category.isCustom).map((category) => category.id),
     );
+    const nextCustomIds = new Set(
+      nextCategories.filter((category) => category.isCustom).map((category) => category.id),
+    );
+
+    await Promise.all(
+      nextCategories
+        .filter((category) => category.isCustom)
+        .map((category) =>
+          setDoc(
+            doc(db, "users", uid, "plasticCategories", category.id),
+            {
+              ...category,
+              createdAt: serverTimestamp(),
+            },
+            { merge: true },
+          ),
+        ),
+    );
+
+    await Promise.all(
+      [...existingCustomIds]
+        .filter((id) => !nextCustomIds.has(id))
+        .map((id) => deleteDoc(doc(db, "users", uid, "plasticCategories", id))),
+    );
+
     setCategories(nextCategories);
   };
 
   const addCategory = async (category: Omit<PlasticCategory, "id">) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      throw new Error("Usuário não autenticado.");
+    }
+
     const newCategory: PlasticCategory = {
       ...category,
       id: `custom-${Date.now()}`,
     };
-    await persist([...categories, newCategory]);
+    await setDoc(
+      doc(db, "users", uid, "plasticCategories", newCategory.id),
+      {
+        ...newCategory,
+        createdAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    setCategories([...categories, newCategory]);
   };
 
   const deleteCategory = async (id: string) => {
-    await persist(categories.filter((c) => c.id !== id));
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      throw new Error("Usuário não autenticado.");
+    }
+
+    const target = categories.find((c) => c.id === id);
+    if (!target || !target.isCustom) return;
+    await deleteDoc(doc(db, "users", uid, "plasticCategories", id));
+    setCategories(categories.filter((c) => c.id !== id));
   };
 
   return (

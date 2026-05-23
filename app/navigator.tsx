@@ -1,4 +1,3 @@
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import {
   createDrawerNavigator,
@@ -6,8 +5,12 @@ import {
   DrawerItem,
 } from "@react-navigation/drawer";
 import { DrawerActions } from "@react-navigation/native";
+import { onAuthStateChanged } from "firebase/auth";
+import { useSocial } from "../src/SocialContext";
+import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
+import { Image } from "react-native";
 
-import MapsScreen from "@/app/maps";
+import MapsScreen from "./maps";
 import { Ionicons } from "@expo/vector-icons";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { signOut } from "firebase/auth";
@@ -17,19 +20,22 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../service/firebaseConfig";
 import { PlasticCategoriesProvider } from "../src/PlasticCategoriesContext";
 import { PlasticConsumptionProvider } from "../src/PlasticConsumptionContext";
+import { RecyclingCompetitionProvider } from "../src/RecyclingCompetitionContext";
+import { RecyclingProvider } from "../src/RecyclingContext";
+import { RecyclingTypesProvider } from "../src/RecyclingTypesContext";
 import { SocialProvider } from "../src/SocialContext";
 import {
   ThemePreferenceProvider,
   useThemePreference,
 } from "../src/ThemePreferenceContext";
+import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
 import LoginScreen from "./auth/login";
 import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
 import ResetPasswordScreen from "./auth/resetPassword";
 import ResetPasswordConfirmScreen from "./auth/resetPasswordConfirm";
-import CommunityScreen from "./community";
+import MeusGruposScreen from "./myGroups";
 import HomeScreen from "./home";
-import MissionsScreen from "./missions";
 import RecordsScreen from "./records";
 import NotificationsScreen from "./notifications";
 import SettingsScreen from "./settings";
@@ -37,11 +43,17 @@ import StatisticsScreen from "./statistics";
 
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
-const BottomTab = createBottomTabNavigator();
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
   const insets = useSafeAreaInsets();
   const { darkModeEnabled } = useThemePreference();
+  const currentDayKey = useCurrentDayKey();
+  const { currentProfile } = useSocial();
+  const { entries } = usePlasticConsumption();
+
+  const todayCount = React.useMemo(() => {
+    return entries.filter((entry) => toLocalDayKey(entry.createdAt) === currentDayKey).length;
+  }, [entries, currentDayKey]);
 
   const palette = darkModeEnabled
     ? {
@@ -49,6 +61,8 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         textMuted: "#7f98b1",
         textPrimary: "#9fb3c7",
         textAccent: "#a9c0d9",
+        iconInactive: "#9fb3c7",
+        iconActive: "#c7d8ea",
         activeBg: "#102a40",
         surface: "#061526",
         dangerText: "#d3a3a5",
@@ -59,14 +73,16 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         textMuted: "#4f6477",
         textPrimary: "#385065",
         textAccent: "#24435f",
+        iconInactive: "#385065",
+        iconActive: "#24435f",
         activeBg: "#d8e6f3",
         surface: "#f4f8fc",
         dangerText: "#8d4c55",
         dangerBg: "#f3dfe2",
       };
 
-  const openMainTab = (screen: "Mapas", params?: Record<string, unknown>) => {
-    (props.navigation as any).navigate("MainTabs", { screen, params });
+  const openMainScreen = (screen: string, params?: Record<string, unknown>) => {
+    (props.navigation as any).navigate(screen, params);
   };
 
   const openRecords = () => {
@@ -85,130 +101,98 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         justifyContent: "flex-start",
         paddingTop: insets.top + 12,
         paddingBottom: Math.max(insets.bottom, 6),
+        backgroundColor: palette.surface || (darkModeEnabled ? "#061526" : "#f4f8fc"),
       }}
     >
-      <View style={{ paddingHorizontal: 0 }}>
-        <View
-          style={{
-            height: 1,
-            backgroundColor: palette.header,
-            marginHorizontal: 16,
-            marginBottom: 10,
-          }}
-        />
-        <Text
-          style={{
-            color: palette.textMuted,
-            fontSize: 13,
-            letterSpacing: 0.8,
-            marginHorizontal: 16,
-            marginBottom: 4,
-          }}
-        >
-          ACOES
-        </Text>
-        <DrawerItem
-          label="Mapa"
-          onPress={() => openMainTab("Mapas")}
-          activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.textPrimary}
-          activeBackgroundColor={palette.activeBg}
-          labelStyle={{
-            color: palette.textPrimary,
-            fontSize: 16,
-            fontWeight: "600",
-          }}
-          style={{
-            borderRadius: 10,
-            marginHorizontal: 8,
-            marginBottom: 2,
-            backgroundColor: "transparent",
-          }}
-          icon={({ color, size }) => (
-            <Ionicons name="map-outline" size={size} color={color} />
+      <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          {currentProfile?.avatarUrl ? (
+            <Image source={{ uri: currentProfile.avatarUrl }} style={{ width: 56, height: 56, borderRadius: 12 }} />
+          ) : (
+            <Image source={require("../assets/images/logo-ciclo.png")} style={{ width: 56, height: 56, borderRadius: 12 }} />
           )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: palette.textPrimary, fontSize: 16, fontWeight: "800" }}>{currentProfile?.username || "Você"}</Text>
+            <Text style={{ color: palette.textMuted, fontSize: 12 }}>{todayCount} registros hoje</Text>
+          </View>
+          <TouchableOpacity onPress={() => openSettings()} style={{ padding: 6 }}>
+            <Ionicons name="settings-outline" size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={{ paddingHorizontal: 8 }}>
+        <DrawerItem
+          label="Início"
+          onPress={() => openMainScreen("Home")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          icon={({ color, size }) => <Ionicons name="home-outline" size={size} color={color || palette.iconInactive} />}
+          activeBackgroundColor={palette.activeBg}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
         />
+
         <DrawerItem
           label="Registros"
           onPress={openRecords}
           activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.textPrimary}
-          activeBackgroundColor={palette.activeBg}
-          labelStyle={{
-            color: palette.textPrimary,
-            fontSize: 16,
-            fontWeight: "600",
-          }}
-          style={{
-            borderRadius: 10,
-            marginHorizontal: 8,
-            marginBottom: 2,
-            backgroundColor: "transparent",
-          }}
-          icon={({ color, size }) => (
-            <Ionicons name="clipboard-outline" size={size} color={color} />
-          )}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="clipboard-outline" size={size} color={color || palette.iconInactive} />}
+        />
+
+        <DrawerItem
+          label="Mapas"
+          onPress={() => openMainScreen("Mapas")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="map-outline" size={size} color={color || palette.iconInactive} />}
         />
       </View>
-      <View
-        style={{
-          borderTopWidth: 1,
-          borderTopColor: palette.header,
-          paddingTop: 4,
-          marginHorizontal: 0,
-        }}
-      >
-        <Text
-          style={{
-            color: palette.textMuted,
-            fontSize: 13,
-            letterSpacing: 0.8,
-            marginHorizontal: 16,
-            marginBottom: 4,
-          }}
-        >
-          CONTA
-        </Text>
+
+      <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: palette.header, paddingTop: 8, paddingHorizontal: 8 }}>
+        <DrawerItem
+          label="Meus grupos"
+          onPress={() => (props.navigation as any).navigate("MeusGrupos")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="trophy-outline" size={size} color={color || palette.iconInactive} />}
+        />
+
+        <DrawerItem
+          label="Notificações"
+          onPress={() => (props.navigation as any).navigate("Notificações")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="notifications-outline" size={size} color={color || palette.iconInactive} />}
+        />
+
         <DrawerItem
           label="Configurações"
           onPress={() => openSettings({ section: undefined })}
           activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.textPrimary}
-          activeBackgroundColor={palette.activeBg}
-          labelStyle={{
-            color: palette.textPrimary,
-            fontSize: 16,
-            fontWeight: "600",
-          }}
-          style={{
-            borderRadius: 10,
-            marginHorizontal: 8,
-            marginBottom: 2,
-            backgroundColor: "transparent",
-          }}
-          icon={({ color, size }) => (
-            <Ionicons name="settings-outline" size={size} color={color} />
-          )}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="settings-outline" size={size} color={color || palette.iconInactive} />}
         />
+
         <DrawerItem
           label="Sair"
           activeTintColor={palette.dangerText}
           inactiveTintColor={palette.dangerText}
           activeBackgroundColor={palette.dangerBg}
-          labelStyle={{
-            color: palette.dangerText,
-            fontSize: 16,
-            fontWeight: "600",
-          }}
-          style={{
-            borderRadius: 10,
-            marginHorizontal: 8,
-            backgroundColor: "transparent",
-            borderWidth: 0,
-          }}
-          icon={({ size, color }) => (
-            <Ionicons name="log-out-outline" size={size} color={color} />
-          )}
+          labelStyle={{ color: palette.dangerText, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ size, color }) => <Ionicons name="log-out-outline" size={size} color={color} />}
           onPress={async () => {
             Alert.alert("Sair", "Deseja realmente sair da conta?", [
               { text: "Cancelar", style: "cancel" },
@@ -216,11 +200,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
                 text: "Sair",
                 style: "destructive",
                 onPress: async () => {
+                  props.navigation.closeDrawer();
                   await signOut(auth);
-                  props.navigation.reset({
-                    index: 0,
-                    routes: [{ name: "Login" }],
-                  });
+                  props.navigation.reset({ index: 0, routes: [{ name: "Login" }] });
                 },
               },
             ]);
@@ -228,125 +210,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         />
       </View>
     </DrawerContentScrollView>
-  );
-}
-
-function BottomTabNavigator() {
-  const { darkModeEnabled } = useThemePreference();
-
-  const palette = darkModeEnabled
-    ? {
-        headerBg: "#0c2740",
-        headerText: "#eaf4ff",
-        tabBg: "#0a2238",
-        tabBorder: "#123252",
-        active: "#36a3ff",
-        inactive: "#9ab6d3",
-      }
-    : {
-        headerBg: "#f4f8fc",
-        headerText: "#1a3551",
-        tabBg: "#e8f0f8",
-        tabBorder: "#c8d8e8",
-        active: "#1f6fb2",
-        inactive: "#5e768d",
-      };
-
-  return (
-    <BottomTab.Navigator
-      screenOptions={({ route, navigation }) => ({
-        headerShown: true,
-        headerStyle: { backgroundColor: palette.headerBg },
-        headerTintColor: palette.headerText,
-        headerTitleStyle: {
-          fontSize: 18,
-          fontWeight: "800",
-        },
-        headerLeft: () => (
-          <TouchableOpacity
-            onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())}
-            style={{ paddingHorizontal: 12, paddingVertical: 6 }}
-          >
-            <Ionicons name="menu" size={24} color={palette.headerText} />
-          </TouchableOpacity>
-        ),
-        tabBarStyle: {
-          backgroundColor: palette.tabBg,
-          borderTopColor: palette.tabBorder,
-          paddingHorizontal: 0,
-          marginHorizontal: 0,
-          paddingLeft: 0,
-          paddingRight: 0,
-          columnGap: 0,
-        },
-        tabBarItemStyle: {
-          flexGrow: route.name === "Mapas" ? 0 : 1,
-          flexBasis: route.name === "Mapas" ? 0 : 0,
-          marginHorizontal: 0,
-          marginVertical: 0,
-          paddingHorizontal: 0,
-          paddingVertical: 0,
-          borderRadius: 0,
-          alignItems: "stretch",
-          minWidth: 0,
-          display: route.name === "Mapas" ? "none" : "flex",
-        },
-        tabBarIconStyle: { margin: 0 },
-        tabBarLabelStyle: { margin: 0, padding: 0 },
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = "home";
-
-          if (route.name === "Home") {
-            iconName = focused ? "home" : "home-outline";
-          } else if (route.name === "Missões") {
-            iconName = focused ? "flag" : "flag-outline";
-          } else if (route.name === "Estatísticas") {
-            iconName = focused ? "bar-chart" : "bar-chart-outline";
-          } else if (route.name === "Notificações") {
-            iconName = focused ? "notifications" : "notifications-outline";
-          } else if (route.name === "Mapas") {
-            iconName = focused ? "map" : "map-outline";
-          } else if (route.name === "Amigos") {
-            iconName = focused ? "people" : "people-outline";
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: palette.active,
-        tabBarInactiveTintColor: palette.inactive,
-      })}
-    >
-      <BottomTab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ title: "Home" }}
-      />
-      <BottomTab.Screen
-        name="Missões"
-        component={MissionsScreen}
-        options={{ title: "Missões" }}
-      />
-      <BottomTab.Screen
-        name="Estatísticas"
-        component={StatisticsScreen}
-        options={{ title: "Estatísticas" }}
-      />
-      <BottomTab.Screen
-        name="Notificações"
-        component={NotificationsScreen}
-        options={{ title: "Notificações" }}
-      />
-      <BottomTab.Screen
-        name="Amigos"
-        component={CommunityScreen}
-        options={{ title: "Amigos" }}
-      />
-      <BottomTab.Screen
-        name="Mapas"
-        component={MapsScreen}
-        options={{ title: "Mapas", tabBarButton: () => null }}
-      />
-    </BottomTab.Navigator>
   );
 }
 
@@ -375,8 +238,12 @@ function AppDrawer() {
 
   return (
     <Drawer.Navigator
+      initialRouteName="Home"
       screenOptions={{
         headerShown: false,
+        drawerType: "back",
+        swipeEnabled: false,
+        overlayColor: "transparent",
         drawerLabelStyle: {
           color: palette.drawerText,
           fontSize: 16,
@@ -389,14 +256,9 @@ function AppDrawer() {
       }}
       drawerContent={(props) => <CustomDrawerContent {...props} />}
     >
-      <Drawer.Screen
-        name="MainTabs"
-        component={BottomTabNavigator}
-        options={{
-          title: "App",
-          drawerItemStyle: { display: "none" },
-        }}
-      />
+      <Drawer.Screen name="Home" component={HomeScreen} options={{ title: "Home", drawerItemStyle: { display: "none" } }} />
+      <Drawer.Screen name="Estatísticas" component={StatisticsScreen} options={{ title: "Estatísticas", drawerItemStyle: { display: "none" } }} />
+      <Drawer.Screen name="Mapas" component={MapsScreen} options={{ title: "Mapas", drawerItemStyle: { display: "none" } }} />
       <Drawer.Screen
         name="Configuracoes"
         component={SettingsScreen}
@@ -406,33 +268,55 @@ function AppDrawer() {
         }}
       />
       <Drawer.Screen
+        name="MeusGrupos"
+        component={MeusGruposScreen}
+        options={{
+          title: "Meus grupos",
+          drawerItemStyle: { display: "none" },
+        }}
+      />
+      <Drawer.Screen
+        name="Notificações"
+        component={NotificationsScreen}
+        options={{
+          title: "Notificações",
+          drawerItemStyle: { display: "none" },
+        }}
+      />
+      <Drawer.Screen
         name="Registros"
         component={RecordsScreen}
         options={({ navigation }) => ({
-          title: "Registros",
-          headerShown: true,
-          headerStyle: { backgroundColor: palette.headerBg },
-          headerTintColor: palette.headerText,
-          headerTitleStyle: {
-            fontSize: 18,
-            fontWeight: "800",
-          },
-          headerLeft: () => (
-            <TouchableOpacity
-              onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())}
-              style={{ paddingHorizontal: 12, paddingVertical: 6 }}
-            >
-              <Ionicons
-                name="menu"
-                size={24}
-                color={palette.headerText}
-              />
-            </TouchableOpacity>
-          ),
+            title: "Registros",
+            headerShown: false,
           drawerItemStyle: { display: "none" },
         })}
       />
     </Drawer.Navigator>
+  );
+}
+
+function AuthenticatedApp() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+    </Stack.Navigator>
+  );
+}
+
+function AuthScreens() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="ResetPasswordConfirm"
+        component={ResetPasswordConfirmScreen}
+        options={{ headerShown: false }}
+      />
+    </Stack.Navigator>
   );
 }
 
@@ -441,40 +325,26 @@ export default function MainNavigator() {
     <ThemePreferenceProvider>
       <PlasticCategoriesProvider>
         <PlasticConsumptionProvider>
-          <SocialProvider>
-            <Stack.Navigator screenOptions={{ headerShown: false }}>
-              <Stack.Screen
-                name="Login"
-                component={LoginScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="Register"
-                component={RegisterScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="VerifyEmail"
-                component={VerifyEmailScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="ResetPassword"
-                component={ResetPasswordScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="ResetPasswordConfirm"
-                component={ResetPasswordConfirmScreen}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="Main"
-                component={AppDrawer}
-                options={{ headerShown: false }}
-              />
-            </Stack.Navigator>
-          </SocialProvider>
+          <RecyclingProvider>
+            <RecyclingTypesProvider>
+              <RecyclingCompetitionProvider>
+                <SocialProvider>
+                  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
+                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+                    <Stack.Screen
+                      name="ResetPasswordConfirm"
+                      component={ResetPasswordConfirmScreen}
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+                  </Stack.Navigator>
+                </SocialProvider>
+              </RecyclingCompetitionProvider>
+            </RecyclingTypesProvider>
+          </RecyclingProvider>
         </PlasticConsumptionProvider>
       </PlasticCategoriesProvider>
     </ThemePreferenceProvider>

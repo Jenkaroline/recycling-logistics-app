@@ -79,30 +79,36 @@ export default function VerifyEmailScreen() {
           handleCodeInApp: true,
         });
         setEmailSent(true);
-        setCanResend(false);
-        setResendTimer(60);
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-        }
-        timerRef.current = setInterval(() => {
-          setResendTimer((prev) => {
-            if (prev <= 1) {
-              if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-              }
-              setCanResend(true);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
+        // start resend cooldown
+        startResendCooldown(60);
       } catch (e: any) {
         setError(translateFirebaseError(e));
       }
     } else {
       setError("Usuário não autenticado. Faça login novamente.");
     }
+  };
+
+  const startResendCooldown = (seconds = 60) => {
+    setCanResend(false);
+    setResendTimer(seconds);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    timerRef.current = setInterval(() => {
+      setResendTimer((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          setCanResend(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   };
 
   useEffect(() => {
@@ -133,7 +139,14 @@ export default function VerifyEmailScreen() {
   };
 
   useEffect(() => {
-    setCanResend(true);
+    // If we arrived here after registration (route params contain a message),
+    // assume the verification email was already sent and start the cooldown.
+    if (routeParams?.message) {
+      setEmailSent(true);
+      startResendCooldown(60);
+    } else {
+      setCanResend(true);
+    }
   }, []);
 
   useEffect(() => {

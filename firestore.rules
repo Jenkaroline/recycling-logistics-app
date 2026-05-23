@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isOwner(userId);
+
+      match /recyclingActions/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /plasticConsumptionEntries/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /plasticConsumptionMeta/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /competitionGroups/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /competitionMeta/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /competitionChatMessages/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /plasticCategories/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /recyclingTypes/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /following/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /followers/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if signedIn() && request.auth.uid == resource.data.userId;
+      }
+
+      match /reactions/{reactionId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if signedIn() && request.auth.uid == resource.data.userId;
+      }
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if signedIn();
+      allow read, update, delete: if false;
+    }
+  }
+}

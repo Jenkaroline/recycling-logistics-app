@@ -5,12 +5,16 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "merge-options": [
+        "./types/merge-options"
       ]
     }
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    "**/*.d.ts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
   ]

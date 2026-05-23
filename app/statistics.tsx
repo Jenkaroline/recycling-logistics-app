@@ -6,7 +6,12 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  Image,
 } from "react-native";
+import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useDrawerStatus } from "@react-navigation/drawer";
 import Svg, {
   Circle,
   Defs,
@@ -84,6 +89,10 @@ function trendMessage(tone: ReturnType<typeof trendTone>) {
 }
 
 export default function StatisticsScreen() {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const drawerStatus = useDrawerStatus();
+  const drawerOpen = drawerStatus === "open";
   const { entries } = usePlasticConsumption();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
@@ -405,7 +414,95 @@ export default function StatisticsScreen() {
   );
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: palette.bg }]}>
+    <View style={{ flex: 1, backgroundColor: palette.bg }}>
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
+        <View style={{ height: insets.top + 10 }} />
+        <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <TouchableOpacity
+            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.panelAlt,
+            }}
+          >
+            <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate("Notificações")}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: palette.panel,
+              borderWidth: 1,
+              borderColor: palette.panelAlt,
+            }}
+          >
+            <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+          </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView style={[styles.container, { backgroundColor: palette.bg }]} contentContainerStyle={{ paddingTop: insets.top + 64 }}>
+      <View
+        style={{
+          marginBottom: 18,
+          backgroundColor: palette.panel,
+          borderRadius: 28,
+          padding: 18,
+          borderWidth: 1,
+          borderColor: palette.panelAlt,
+          overflow: "hidden",
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+          <View style={{ flex: 1, paddingTop: 2 }}>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                backgroundColor: darkModeEnabled ? "rgba(54, 163, 255, 0.14)" : "rgba(31, 111, 178, 0.10)",
+                borderWidth: 1,
+                borderColor: darkModeEnabled ? "rgba(54, 163, 255, 0.32)" : "rgba(31, 111, 178, 0.18)",
+                borderRadius: 999,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>
+                ESTATÍSTICAS
+              </Text>
+            </View>
+
+            <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 0.8, marginBottom: 6, fontWeight: "700" }}>
+              VISÃO GERAL DO CONSUMO
+            </Text>
+            <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 32, fontWeight: "900" }}>
+              {dashboard.currentAverage.toFixed(0)}g por dia
+            </Text>
+            <Text style={{ color: palette.textSecondary, marginTop: 8, fontSize: 13 }}>
+              {dashboard.growthPercent >= 0
+                ? `↑ ${dashboard.growthPercent.toFixed(0)}% vs período anterior`
+                : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}% vs período anterior`}
+            </Text>
+          </View>
+
+          <View style={{ width: 132, height: 132, borderRadius: 34, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.panelAlt, overflow: "hidden" }}>
+            <Image source={require("../assets/images/peixe-vermelho.png")} style={{ width: 112, height: 112 }} />
+          </View>
+        </View>
+      </View>
+
       <Text style={[styles.subtitle, { color: palette.textSecondary }]}>
         Consumo de plástico — visão completa
       </Text>
@@ -878,6 +975,7 @@ export default function StatisticsScreen() {
         </View>
       </View>
     </ScrollView>
+    </View>
   );
 }
 

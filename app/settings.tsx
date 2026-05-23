@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import {
   deleteUser,
@@ -26,12 +26,14 @@ import {
 } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useDrawerStatus } from "@react-navigation/drawer";
 import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { auth, storage } from "../service/firebaseConfig";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
 
 type ActivePanel = "none" | "settings" | "statistics";
 type DashboardRange = "week" | "month" | "year";
@@ -134,6 +136,8 @@ export default function SettingsScreen() {
   const { darkModeEnabled, setDarkModeEnabled } = useThemePreference();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const drawerStatus = useDrawerStatus();
+  const drawerOpen = drawerStatus === "open";
   const palette = darkModeEnabled
     ? {
         bg: "#061526",
@@ -277,13 +281,13 @@ export default function SettingsScreen() {
   const memberSince = user?.metadata.creationTime
     ? new Date(user.metadata.creationTime).toLocaleDateString("pt-BR")
     : "Nao disponivel";
+  const currentDayKey = useCurrentDayKey();
 
   const todayTotal = useMemo(() => {
-    const today = new Date().toDateString();
     return entries
-      .filter((entry) => new Date(entry.createdAt).toDateString() === today)
+      .filter((entry) => toLocalDayKey(entry.createdAt) === currentDayKey)
       .reduce((sum, entry) => sum + entry.amountGrams, 0);
-  }, [entries]);
+  }, [entries, currentDayKey]);
 
   const dashboard = useMemo(() => {
     const goalPerDay = 50;
@@ -708,19 +712,79 @@ export default function SettingsScreen() {
         paddingBottom: insets.bottom + 36,
       }}
     >
-      <TouchableOpacity
-        onPress={() => navigation.navigate("MainTabs")}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <TouchableOpacity
+          onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 6,
+            paddingRight: 8,
+          }}
+        >
+          <Ionicons name={drawerOpen ? "close" : "menu"} size={22} color={palette.textPrimary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => (navigation as any).navigate("Notificações")}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 10,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: palette.panel,
+            borderWidth: 1,
+            borderColor: palette.panelAlt,
+          }}
+        >
+          <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+        </TouchableOpacity>
+      </View>
+
+      <View
         style={{
-          alignSelf: "flex-start",
-          flexDirection: "row",
-          alignItems: "center",
+          backgroundColor: palette.panel,
+          borderRadius: 28,
+          padding: 16,
+          borderWidth: 1,
+          borderColor: palette.panelAlt,
           marginBottom: 14,
-          paddingVertical: 6,
-          paddingRight: 8,
+          shadowColor: "#000",
+          shadowOpacity: darkModeEnabled ? 0.18 : 0.06,
+          shadowOffset: { width: 0, height: 12 },
+          shadowRadius: 24,
+          elevation: 4,
         }}
       >
-        <Ionicons name="arrow-back" size={22} color={palette.textPrimary} />
-      </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+          <View style={{ flex: 1, paddingTop: 2 }}>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                backgroundColor: darkModeEnabled ? "rgba(15, 211, 182, 0.14)" : "rgba(15, 211, 182, 0.10)",
+                borderWidth: 1,
+                borderColor: darkModeEnabled ? "rgba(15, 211, 182, 0.32)" : "rgba(15, 211, 182, 0.24)",
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                marginBottom: 8,
+              }}
+            >
+              <Text style={{ color: "#0fd3b6", fontSize: 10, fontWeight: "800", letterSpacing: 0.8 }}>
+                CONFIGURAÇÕES
+              </Text>
+            </View>
+
+            <Text style={{ color: palette.textPrimary, fontSize: 24, lineHeight: 28, fontWeight: "900" }}>
+              Ajustes da conta
+            </Text>
+            <Text style={{ color: palette.textSecondary, marginTop: 4, fontSize: 12, lineHeight: 17 }}>
+              Conta, notificações, localização e aparência.
+            </Text>
+          </View>
+
+         </View>
+      </View>
 
       <View
         style={{
@@ -732,6 +796,7 @@ export default function SettingsScreen() {
           marginBottom: 16,
         }}
       >
+
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <TouchableOpacity
             onPress={handlePickProfilePhoto}
@@ -744,6 +809,8 @@ export default function SettingsScreen() {
               alignItems: "center",
               justifyContent: "center",
               marginRight: 12,
+              borderWidth: 1,
+              borderColor: "rgba(15, 211, 182, 0.32)",
             }}
           >
             {avatarUrl ? (
@@ -752,11 +819,7 @@ export default function SettingsScreen() {
                 style={{ width: 72, height: 72 }}
               />
             ) : (
-              <MaterialCommunityIcons
-                name="account"
-                size={38}
-                color="#36a3ff"
-              />
+              <MaterialCommunityIcons name="account" size={38} color="#36a3ff" />
             )}
             {uploadingPhoto ? (
               <View
@@ -768,14 +831,12 @@ export default function SettingsScreen() {
                   justifyContent: "center",
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 12 }}>
-                  Atualizando...
-                </Text>
+                <Text style={{ color: "#fff", fontSize: 12 }}>Atualizando...</Text>
               </View>
             ) : null}
           </TouchableOpacity>
 
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }}>            
             <Text
               style={{
                 color: palette.textPrimary,
@@ -785,52 +846,13 @@ export default function SettingsScreen() {
             >
               {fullName}
             </Text>
-            <Text style={{ color: palette.textSecondary, marginBottom: 4 }}>
+            <Text style={{ color: palette.textSecondary, marginTop: 2, marginBottom: 4 }}>
               {user?.email}
             </Text>
             <Text style={{ color: palette.textMuted, fontSize: 12 }}>
               Membro desde {memberSince}
             </Text>
           </View>
-        </View>
-
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            marginTop: 14,
-          }}
-        >
-          {[
-            { label: "Seguidores", value: currentProfile?.followersCount || 0 },
-            { label: "Seguindo", value: currentProfile?.followingCount || 0 },
-            { label: "Publicações", value: myPosts.length },
-          ].map((item) => (
-            <View
-              key={item.label}
-              style={{
-                flex: 1,
-                alignItems: "center",
-                backgroundColor: palette.panelAlt,
-                borderRadius: 14,
-                paddingVertical: 10,
-                marginHorizontal: 4,
-              }}
-            >
-              <Text
-                style={{
-                  color: palette.textPrimary,
-                  fontSize: 18,
-                  fontWeight: "800",
-                }}
-              >
-                {item.value}
-              </Text>
-              <Text style={{ color: palette.textMuted, fontSize: 11 }}>
-                {item.label}
-              </Text>
-            </View>
-          ))}
         </View>
       </View>
 
@@ -852,7 +874,7 @@ export default function SettingsScreen() {
             marginBottom: 10,
           }}
         >
-          Preferências e conta
+          Preferências
         </Text>
 
         <TouchableOpacity

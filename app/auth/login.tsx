@@ -63,9 +63,7 @@ export default function LoginScreen() {
         accentSoft: "rgba(54, 163, 255, 0.12)",
       };
 
-    const heroImageSource = error
-      ? require("../../assets/images/erro-ilustracao.png")
-      : require("../../assets/images/icon.png");
+    const heroImageSource = require("../../assets/images/logo-ciclo.png");
     const horizontalPadding = width < 360 ? 14 : width < 420 ? 18 : 22;
     const cardWidth = Math.min(460, width - horizontalPadding * 2);
     const heroImageSize = Math.min(160, Math.round(cardWidth * 0.45));
