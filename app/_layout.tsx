@@ -1,5 +1,5 @@
 import { DefaultTheme, ThemeProvider } from "@react-navigation/native";
-import { Stack, useRouter } from "expo-router";
+import { Slot, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import "react-native-reanimated";
@@ -34,9 +34,9 @@ export default function RootLayout() {
   }, [router]);
 
   return (
-    <ThemeProvider value={DefaultTheme}>
+    <>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }} />
-    </ThemeProvider>
+      <Slot />
+    </>
   );
 }

@@ -1,6 +1,7 @@
 /**
  * Serviço de criptografia para dados sensíveis
  * Usa algoritmos padrão para criptografia/descriptografia de dados
+ * Compatível com React Native/Expo
  */
 
 /**
@@ -9,9 +10,9 @@
  */
 export function encryptData(data: string, key?: string): string {
     try {
-        // Implementação simples com base64
+        // Implementação com base64 compatível com React Native
         // Em produção, considere usar bibliotecas como 'crypto-js' ou 'tweetnacl'
-        return Buffer.from(data).toString('base64');
+        return btoa(unescape(encodeURIComponent(data)));
     } catch (error) {
         console.error('Erro ao criptografar dados:', error);
         return data;
@@ -23,8 +24,8 @@ export function encryptData(data: string, key?: string): string {
  */
 export function decryptData(encryptedData: string, key?: string): string {
     try {
-        // Implementação simples com base64
-        return Buffer.from(encryptedData, 'base64').toString('utf-8');
+        // Implementação com base64 compatível com React Native
+        return decodeURIComponent(escape(atob(encryptedData)));
     } catch (error) {
         console.error('Erro ao descriptografar dados:', error);
         return encryptedData;
@@ -69,16 +70,13 @@ export function decryptObject<T = any>(
 export function generateEncryptionKey(): string {
     try {
         // Gera uma string aleatória para usar como chave
-        const array = new Uint8Array(32);
-        if (typeof global !== 'undefined' && global.crypto) {
-            global.crypto.getRandomValues(array);
-        } else {
-            // Fallback para React Native
-            for (let i = 0; i < array.length; i++) {
-                array[i] = Math.floor(Math.random() * 256);
-            }
+        // Compatível com React Native
+        const randomValues = [];
+        for (let i = 0; i < 32; i++) {
+            randomValues.push(Math.floor(Math.random() * 256));
         }
-        return Buffer.from(array).toString('hex');
+        // Converte para hexadecimal sem usar Buffer
+        return randomValues.map((v) => v.toString(16).padStart(2, '0')).join('');
     } catch (error) {
         console.error('Erro ao gerar chave de criptografia:', error);
         return '';
