@@ -25,6 +25,7 @@ import {
 import LoginScreen from "./auth/login";
 import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
+import Verify2FAScreen from "./auth/verify2FA";
 import EnrollPhoneScreen from "./auth/enrollPhone";
 import CommunityScreen from "./community";
 import HomeScreen from "./home";
@@ -455,6 +456,11 @@ export default function MainNavigator() {
               <Stack.Screen
                 name="VerifyEmail"
                 component={VerifyEmailScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="Verify2FA"
+                component={Verify2FAScreen}
                 options={{ headerShown: false }}
               />
               <Stack.Screen
