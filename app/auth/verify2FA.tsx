@@ -2,10 +2,11 @@ import { useRoute } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import React, { useState, useEffect } from "react";
-import { StyleSheet, Text, View, ScrollView } from "react-native";
+import { StyleSheet, Text, View, SafeAreaView, KeyboardAvoidingView, Platform } from "react-native";
 import { Button, TextInput, ActivityIndicator } from "react-native-paper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
 import { resolveMultiFactorChallenge } from "../../src/TwoFactorAuthService";
+import { logSuccessfulLogin } from "../../src/AuthAuditService";
 
 type RootStackParamList = {
   VerifyEmail: undefined;
@@ -58,7 +59,14 @@ export default function Verify2FAScreen() {
 
     setIsLoading(true);
     try {
-      await resolveMultiFactorChallenge(smsCode, resolver);
+      const userCredential = await resolveMultiFactorChallenge(smsCode, resolver);
+      if (userCredential.user) {
+        void logSuccessfulLogin(
+          userCredential.user.uid,
+          userCredential.user.email,
+          "email_mfa",
+        );
+      }
       navigation.navigate("Main");
     } catch (err: any) {
       setError(err.message || "Código inválido. Tente novamente.");
@@ -68,16 +76,14 @@ export default function Verify2FAScreen() {
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={[
-        styles.container,
-        { backgroundColor: palette.bg },
-      ]}
-    >
-      <Text style={[styles.title, { color: palette.textPrimary }]}>
-        Verificação de Segurança
-      </Text>
-      <Text style={[styles.subtitle, { color: palette.link }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: palette.bg }]}> 
+      <KeyboardAvoidingView
+        style={[styles.container, { backgroundColor: palette.bg }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={styles.content}>
+          <Text style={[styles.title, { color: palette.textPrimary }]}>Verificação de Segurança</Text>
+          <Text style={[styles.subtitle, { color: palette.link }]}>
         Insira o código enviado para seu telefone
       </Text>
 
@@ -120,16 +126,24 @@ export default function Verify2FAScreen() {
       )}
 
       {isLoading && <ActivityIndicator animating={true} style={styles.loader} />}
-    </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    justifyContent: "center",
     paddingHorizontal: 20,
     paddingVertical: 40,
+  },
+  content: {
+    flex: 1,
+    justifyContent: "flex-start",
   },
   title: {
     fontSize: 28,

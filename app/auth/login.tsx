@@ -8,6 +8,7 @@ import { FirebaseRecaptchaVerifierModal } from "expo-firebase-recaptcha";
 import { auth, firebaseConfig } from "../../service/firebaseConfig";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
 import { sendPhoneLoginCode } from "../../src/TwoFactorAuthService";
+import { logSuccessfulLogin } from "../../src/AuthAuditService";
 
 // Defina os nomes das rotas do seu Stack
 type RootStackParamList = {
@@ -59,6 +60,13 @@ export default function LoginScreen() {
         alert("Por favor, verifique seu e-mail antes de acessar o app.");
         navigation.navigate("VerifyEmail");
         return;
+      }
+      if (userCredential.user) {
+        void logSuccessfulLogin(
+          userCredential.user.uid,
+          userCredential.user.email,
+          "email",
+        );
       }
       navigation.navigate("Main");
     } catch (caughtError: any) {
