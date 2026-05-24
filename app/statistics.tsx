@@ -48,6 +48,7 @@ function monthLabel(month: string) {
 function shortMonthLabel(date: Date) {
   return [
     "Jan",
+    "Fev",
     "Mar",
     "Abr",
     "Mai",
@@ -105,47 +106,47 @@ export default function StatisticsScreen() {
 
   const palette = darkModeEnabled
     ? {
-        bg: "#061526",
-        panel: "#0c2740",
-        panelAlt: "#123252",
-        textPrimary: "#ffffff",
-        textSecondary: "#b7cde6",
-        textMuted: "#9ab6d3",
-        textSoft: "#d7ebff",
-        statsPanel: "#0a2034",
-        statsPanelAlt: "#102a43",
-        statsBorder: "#1d3b5c",
-        statsBorderAlt: "#244463",
-        statsTextMuted: "#b7b7b7",
-        statsTextSubtle: "#d7d7d7",
-        segmentBg: "#0c2237",
-        segmentBgActive: "#f5f5f5",
-        segmentBorder: "#244463",
-        segmentBorderActive: "#ffffff",
-        segmentText: "#f4f4f4",
-        segmentTextActive: "#000000",
-      }
+      bg: "#061526",
+      panel: "#0c2740",
+      panelAlt: "#123252",
+      textPrimary: "#ffffff",
+      textSecondary: "#b7cde6",
+      textMuted: "#9ab6d3",
+      textSoft: "#d7ebff",
+      statsPanel: "#0a2034",
+      statsPanelAlt: "#102a43",
+      statsBorder: "#1d3b5c",
+      statsBorderAlt: "#244463",
+      statsTextMuted: "#b7b7b7",
+      statsTextSubtle: "#d7d7d7",
+      segmentBg: "#0c2237",
+      segmentBgActive: "#f5f5f5",
+      segmentBorder: "#244463",
+      segmentBorderActive: "#ffffff",
+      segmentText: "#f4f4f4",
+      segmentTextActive: "#000000",
+    }
     : {
-        bg: "#f4f8fc",
-        panel: "#ffffff",
-        panelAlt: "#edf3f9",
-        textPrimary: "#173047",
-        textSecondary: "#485c70",
-        textMuted: "#576d82",
-        textSoft: "#1f3b55",
-        statsPanel: "#ffffff",
-        statsPanelAlt: "#f8fbff",
-        statsBorder: "#d7e5f2",
-        statsBorderAlt: "#dbe8f5",
-        statsTextMuted: "#4d6378",
-        statsTextSubtle: "#3f556a",
-        segmentBg: "#eef4fa",
-        segmentBgActive: "#dbe9f6",
-        segmentBorder: "#c7d8e8",
-        segmentBorderActive: "#89aac7",
-        segmentText: "#3f566b",
-        segmentTextActive: "#10293f",
-      };
+      bg: "#f4f8fc",
+      panel: "#ffffff",
+      panelAlt: "#edf3f9",
+      textPrimary: "#173047",
+      textSecondary: "#485c70",
+      textMuted: "#576d82",
+      textSoft: "#1f3b55",
+      statsPanel: "#ffffff",
+      statsPanelAlt: "#f8fbff",
+      statsBorder: "#d7e5f2",
+      statsBorderAlt: "#dbe8f5",
+      statsTextMuted: "#4d6378",
+      statsTextSubtle: "#3f556a",
+      segmentBg: "#eef4fa",
+      segmentBgActive: "#dbe9f6",
+      segmentBorder: "#c7d8e8",
+      segmentBorderActive: "#89aac7",
+      segmentText: "#3f566b",
+      segmentTextActive: "#10293f",
+    };
 
   const dashboard = useMemo(() => {
     const goalPerDay = 50;
@@ -212,8 +213,8 @@ export default function StatisticsScreen() {
         99,
         Math.round(
           100 -
-            (currentAverage / goalPerDay) * 42 -
-            (aboveGoalDays / Math.max(rangeDays, 1)) * 28,
+          (currentAverage / goalPerDay) * 42 -
+          (aboveGoalDays / Math.max(rangeDays, 1)) * 28,
         ),
       ),
     );
@@ -242,90 +243,90 @@ export default function StatisticsScreen() {
     const barSegments =
       statsRange === "week"
         ? Array.from({ length: 7 }, (_, index) => {
-            const start = new Date(currentStart);
-            start.setDate(currentStart.getDate() + index);
-            start.setHours(0, 0, 0, 0);
-            const end = new Date(start);
-            end.setHours(23, 59, 59, 999);
-            return {
-              key: dayKey(start),
-              label: shortWeekday(start),
-              detail: bucketLabel(start),
-              grams: dailyMap.get(dayKey(start)) ?? 0,
-              start,
-              end,
-              categories: buildCategories(start, end),
-            };
-          })
+          const start = new Date(currentStart);
+          start.setDate(currentStart.getDate() + index);
+          start.setHours(0, 0, 0, 0);
+          const end = new Date(start);
+          end.setHours(23, 59, 59, 999);
+          return {
+            key: dayKey(start),
+            label: shortWeekday(start),
+            detail: bucketLabel(start),
+            grams: dailyMap.get(dayKey(start)) ?? 0,
+            start,
+            end,
+            categories: buildCategories(start, end),
+          };
+        })
         : statsRange === "month"
           ? Array.from(
-              {
-                length: Math.max(
-                  4,
-                  Math.ceil(
-                    new Date(
-                      today.getFullYear(),
-                      today.getMonth() + 1,
-                      0,
-                    ).getDate() / 7,
-                  ),
+            {
+              length: Math.max(
+                4,
+                Math.ceil(
+                  new Date(
+                    today.getFullYear(),
+                    today.getMonth() + 1,
+                    0,
+                  ).getDate() / 7,
                 ),
-              },
-              (_, index) => {
-                const bucketStart = new Date(currentStart);
-                bucketStart.setDate(1 + index * 7);
-                bucketStart.setHours(0, 0, 0, 0);
-                const bucketEnd = new Date(bucketStart);
-                bucketEnd.setDate(
-                  Math.min(
-                    bucketStart.getDate() + 6,
-                    new Date(
-                      today.getFullYear(),
-                      today.getMonth() + 1,
-                      0,
-                    ).getDate(),
-                  ),
-                );
-                bucketEnd.setHours(23, 59, 59, 999);
-                let grams = 0;
-                for (let i = 0; i < 7; i += 1) {
-                  const date = new Date(bucketStart);
-                  date.setDate(bucketStart.getDate() + i);
-                  if (date.getMonth() === currentStart.getMonth())
-                    grams += dailyMap.get(dayKey(date)) ?? 0;
-                }
-                return {
-                  key: dayKey(bucketStart),
-                  label: `Semana ${index + 1}`,
-                  detail: `${bucketLabel(bucketStart)} - ${bucketLabel(bucketEnd)}`,
-                  grams,
-                  start: bucketStart,
-                  end: bucketEnd,
-                  categories: buildCategories(bucketStart, bucketEnd),
-                };
-              },
-            )
-          : Array.from({ length: 12 }, (_, index) => {
-              const monthStart = new Date(today.getFullYear(), index, 1);
-              monthStart.setHours(0, 0, 0, 0);
-              const monthEnd = new Date(today.getFullYear(), index + 1, 1);
-              monthEnd.setDate(0);
-              monthEnd.setHours(23, 59, 59, 999);
+              ),
+            },
+            (_, index) => {
+              const bucketStart = new Date(currentStart);
+              bucketStart.setDate(1 + index * 7);
+              bucketStart.setHours(0, 0, 0, 0);
+              const bucketEnd = new Date(bucketStart);
+              bucketEnd.setDate(
+                Math.min(
+                  bucketStart.getDate() + 6,
+                  new Date(
+                    today.getFullYear(),
+                    today.getMonth() + 1,
+                    0,
+                  ).getDate(),
+                ),
+              );
+              bucketEnd.setHours(23, 59, 59, 999);
               let grams = 0;
-              normalized.forEach((item) => {
-                if (item.date >= monthStart && item.date <= monthEnd)
-                  grams += item.grams;
-              });
+              for (let i = 0; i < 7; i += 1) {
+                const date = new Date(bucketStart);
+                date.setDate(bucketStart.getDate() + i);
+                if (date.getMonth() === currentStart.getMonth())
+                  grams += dailyMap.get(dayKey(date)) ?? 0;
+              }
               return {
-                key: monthKey(monthStart),
-                label: shortMonthLabel(monthStart),
-                detail: shortMonthLabel(monthStart),
+                key: dayKey(bucketStart),
+                label: `Semana ${index + 1}`,
+                detail: `${bucketLabel(bucketStart)} - ${bucketLabel(bucketEnd)}`,
                 grams,
-                start: monthStart,
-                end: monthEnd,
-                categories: buildCategories(monthStart, monthEnd),
+                start: bucketStart,
+                end: bucketEnd,
+                categories: buildCategories(bucketStart, bucketEnd),
               };
+            },
+          )
+          : Array.from({ length: 12 }, (_, index) => {
+            const monthStart = new Date(today.getFullYear(), index, 1);
+            monthStart.setHours(0, 0, 0, 0);
+            const monthEnd = new Date(today.getFullYear(), index + 1, 1);
+            monthEnd.setDate(0);
+            monthEnd.setHours(23, 59, 59, 999);
+            let grams = 0;
+            normalized.forEach((item) => {
+              if (item.date >= monthStart && item.date <= monthEnd)
+                grams += item.grams;
             });
+            return {
+              key: monthKey(monthStart),
+              label: shortMonthLabel(monthStart),
+              detail: shortMonthLabel(monthStart),
+              grams,
+              start: monthStart,
+              end: monthEnd,
+              categories: buildCategories(monthStart, monthEnd),
+            };
+          });
 
     const barMax = Math.max(...barSegments.map((item) => item.grams), 1);
     const pieSlices = [
@@ -371,8 +372,8 @@ export default function StatisticsScreen() {
 
   const selectedSegment = selectedBarKey
     ? (dashboard.barSegments.find(
-        (segment) => segment.key === selectedBarKey,
-      ) ?? null)
+      (segment) => segment.key === selectedBarKey,
+    ) ?? null)
     : null;
   const categoryColors = [
     "#4fd1ff",
@@ -619,13 +620,13 @@ export default function StatisticsScreen() {
                 7,
                 Math.floor(
                   (chartWidth - 60) /
-                    Math.max(dashboard.barSegments.length * 2.9, 1),
+                  Math.max(dashboard.barSegments.length * 2.9, 1),
                 ),
               );
               const barGap = Math.max(
                 5,
                 (chartWidth - 44 - dashboard.barSegments.length * barWidth) /
-                  Math.max(dashboard.barSegments.length - 1, 1),
+                Math.max(dashboard.barSegments.length - 1, 1),
               );
               const barHeight =
                 (segment.grams / dashboard.barMax) * barAreaHeight;
@@ -685,13 +686,13 @@ export default function StatisticsScreen() {
               7,
               Math.floor(
                 (chartWidth - 60) /
-                  Math.max(dashboard.barSegments.length * 2.9, 1),
+                Math.max(dashboard.barSegments.length * 2.9, 1),
               ),
             );
             const barGap = Math.max(
               5,
               (chartWidth - 44 - dashboard.barSegments.length * barWidth) /
-                Math.max(dashboard.barSegments.length - 1, 1),
+              Math.max(dashboard.barSegments.length - 1, 1),
             );
             const barHeight =
               (segment.grams / dashboard.barMax) * barAreaHeight;
