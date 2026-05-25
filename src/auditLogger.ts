@@ -10,6 +10,9 @@ export type AuditEventType =
   | "select"
   | "message"
   | "member_add"
+  | "member_invite"
+  | "member_invite_accept"
+  | "member_invite_decline"
   | "member_remove"
   | "goal_set";
 

@@ -97,27 +97,47 @@ export function PlasticConsumptionProvider({
         collection(db, "users", uid, "plasticConsumptionEntries"),
         orderBy("createdAt", "desc"),
       );
-      unsubscribeEntries = onSnapshot(entriesQuery, (snapshot) => {
-        setEntries(
-          snapshot.docs.map((snap) =>
-            normalizeEntry({
-              id: snap.id,
-              ...(snap.data() as Omit<PlasticEntry, "id">),
-            }),
-          ),
-        );
-      });
+      unsubscribeEntries = onSnapshot(
+        entriesQuery,
+        (snapshot) => {
+          setEntries(
+            snapshot.docs.map((snap) =>
+              normalizeEntry({
+                id: snap.id,
+                ...(snap.data() as Omit<PlasticEntry, "id">),
+              }),
+            ),
+          );
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setEntries([]);
+            return;
+          }
+          console.warn("Plastic entries listener failed:", error);
+        },
+      );
 
       const goalRef = doc(db, "users", uid, "plasticConsumptionMeta", "goal");
-      unsubscribeGoal = onSnapshot(goalRef, (snapshot) => {
-        if (!snapshot.exists()) {
-          setGoalGrams(null);
-          return;
-        }
+      unsubscribeGoal = onSnapshot(
+        goalRef,
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            setGoalGrams(null);
+            return;
+          }
 
-        const nextGoal = Number(snapshot.data().goalGrams);
-        setGoalGrams(Number.isNaN(nextGoal) ? null : nextGoal);
-      });
+          const nextGoal = Number(snapshot.data().goalGrams);
+          setGoalGrams(Number.isNaN(nextGoal) ? null : nextGoal);
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setGoalGrams(null);
+            return;
+          }
+          console.warn("Plastic goal listener failed:", error);
+        },
+      );
     };
 
     bindForUid(auth.currentUser?.uid || null);

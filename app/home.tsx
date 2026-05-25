@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { useNavigation, DrawerActions, useRoute } from "@react-navigation/native";
 import { useDrawerStatus } from "@react-navigation/drawer";
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Modal, ScrollView, Text, TouchableOpacity, View, useWindowDimensions, Animated, Easing, Alert } from "react-native";
@@ -12,6 +12,7 @@ import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import { useAppNotifications } from "../src/useAppNotifications";
 import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../service/firebaseConfig";
@@ -19,6 +20,12 @@ import { auth } from "../service/firebaseConfig";
 type QuickActionsProps = {
   onPressHistory: () => void;
   onPressPlus: () => void;
+  onPressPrevGroup?: () => void;
+  onPressNextGroup?: () => void;
+  onPressAllGroups?: () => void;
+  showGroupControls?: boolean;
+  canGoPrev?: boolean;
+  canGoNext?: boolean;
   historyColor: string;
   plusColor: string;
   borderColor: string;
@@ -28,6 +35,12 @@ type QuickActionsProps = {
 function QuickActions({
   onPressHistory,
   onPressPlus,
+  onPressPrevGroup,
+  onPressNextGroup,
+  onPressAllGroups,
+  showGroupControls,
+  canGoPrev,
+  canGoNext,
   historyColor,
   plusColor,
   borderColor,
@@ -66,21 +79,73 @@ function QuickActions({
       >
         <MaterialCommunityIcons name="plus" size={18} color={plusColor} />
       </TouchableOpacity>
+
+      {showGroupControls ? (
+        <>
+          <TouchableOpacity
+            onPress={onPressAllGroups}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              borderWidth: 0,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <MaterialCommunityIcons name="view-grid-outline" size={18} color={historyColor} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={onPressPrevGroup}
+            disabled={!canGoPrev}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              borderWidth: 0,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: canGoPrev ? 1 : 0.35,
+            }}
+          >
+            <MaterialCommunityIcons name="chevron-left" size={22} color={historyColor} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={onPressNextGroup}
+            disabled={!canGoNext}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              borderWidth: 0,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: canGoNext ? 1 : 0.35,
+            }}
+          >
+            <MaterialCommunityIcons name="chevron-right" size={22} color={historyColor} />
+          </TouchableOpacity>
+        </>
+      ) : null}
     </View>
   );
 }
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const insets = useSafeAreaInsets();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const { entries, addEntry, totalGrams, goalGrams, setGoal } = usePlasticConsumption();
   const { categories, addCategory, deleteCategory } = usePlasticCategories();
   const { entries: recyclingEntries, addAction: addRecyclingAction, deleteAction: deleteRecyclingAction } = useRecycling();
-  const { activeGroupId, awardXpToActiveGroup } = useRecyclingCompetition();
+  const { groups, activeGroup, activeGroupId, rankedMembers, setActiveGroup, awardXpToActiveGroup } = useRecyclingCompetition();
   const { types: recyclingTypes, addType: addRecyclingType, deleteType: deleteRecyclingType } = useRecyclingTypes();
   const { darkModeEnabled } = useThemePreference();
+  const { notificationCount } = useAppNotifications();
 
   const palette = darkModeEnabled
     ? {
@@ -142,6 +207,7 @@ export default function HomeScreen() {
   const [newCategoryIcon, setNewCategoryIcon] = useState(
     "package-variant-closed",
   );
+  const ecopontoEnsuredRef = useRef(false);
   const currentDayKey = useCurrentDayKey();
 
   const todayTotal = useMemo(() => {
@@ -207,6 +273,7 @@ export default function HomeScreen() {
   ];
 
   const { width } = useWindowDimensions();
+  const isCompactWidth = width < 430;
   const cardPadding = 18;
   const heroGoal = goalGrams ?? 50;
   const progress = Math.min(1, todayTotal / (heroGoal || 1));
@@ -215,6 +282,126 @@ export default function HomeScreen() {
   const [goalInput, setGoalInput] = useState(String(goalGrams ?? ""));
   const [pageIndex, setPageIndex] = useState(0);
   const horizontalRef = useRef<ScrollView>(null);
+  const routeTab = route?.params?.tab;
+  const routeGroupId = route?.params?.groupId;
+
+  const switchableGroups = useMemo(() => {
+    return groups.filter((group) => group.isActive);
+  }, [groups]);
+
+  const currentGroup = useMemo(() => {
+    if (activeGroup) return activeGroup;
+    return switchableGroups[0] || null;
+  }, [activeGroup, switchableGroups]);
+
+  const currentGroupRanking = useMemo(() => {
+    if (rankedMembers.length > 0) return rankedMembers;
+    return currentGroup?.members || [];
+  }, [rankedMembers, currentGroup]);
+
+  const currentUserRanking = useMemo(() => {
+    const currentUser = auth.currentUser;
+    const currentUid = currentUser?.uid || null;
+    const currentName = currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "";
+
+    const memberIndex = currentGroupRanking.findIndex((member) => {
+      if (currentUid && member.id === currentUid) return true;
+      return Boolean(currentName) && member.name.trim().toLowerCase() === currentName.toLowerCase();
+    });
+
+    if (memberIndex < 0) return null;
+
+    return {
+      member: currentGroupRanking[memberIndex],
+      position: memberIndex + 1,
+    };
+  }, [currentGroupRanking]);
+
+  const notificationBadgeCount = Math.min(notificationCount, 99);
+
+  // Helpers to compute smooth color transitions based on ranking
+  const hexToRgb = (hex: string) => {
+    const h = hex.replace('#', '');
+    const bigint = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+    return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+  };
+
+  const rgbToHex = (r: number, g: number, b: number) => {
+    return '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
+  };
+
+  const blendHex = (a: string, b: string, t: number) => {
+    const A = hexToRgb(a);
+    const B = hexToRgb(b);
+    const r = A.r + (B.r - A.r) * t;
+    const g = A.g + (B.g - A.g) * t;
+    const bb = A.b + (B.b - A.b) * t;
+    return rgbToHex(r, g, bb);
+  };
+
+  const hexToRgba = (hex: string, alpha: number) => {
+    const { r, g, b } = hexToRgb(hex);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  const rankingCardStyle = useMemo(() => {
+    if (!currentUserRanking) return null;
+    const position = currentUserRanking.position;
+    const groupSize = Math.max(1, currentGroupRanking.length || 1);
+    const fraction = groupSize <= 1 ? 1 : (groupSize - position) / (groupSize - 1); // 1 = 1st, 0 = last
+
+    // Blend from positive accent to danger as the user falls in ranking.
+    const accentBlend = blendHex(palette.recycleAccent, palette.danger, 1 - fraction);
+
+    // Background: subtle tinted surface using accent blend with small alpha influenced by fraction
+    const bg = hexToRgba(accentBlend, 0.08 + 0.18 * fraction);
+    const border = hexToRgba(accentBlend, 0.6);
+    const xpColor = accentBlend;
+
+    // Medal colors for top 3
+    const gold = '#FFD700';
+    const silver = '#C0C0C0';
+    const bronze = '#CD7F32';
+    let medalColor: string | undefined = undefined;
+    if (position === 1) medalColor = gold;
+    else if (position === 2) medalColor = silver;
+    else if (position === 3) medalColor = bronze;
+
+    // Special first-place styling
+    if (position === 1) {
+      return { backgroundColor: hexToRgba(gold, 0.12), borderColor: hexToRgba(gold, 0.9), xpColor: gold, trophyColor: gold, medalColor };
+    }
+
+    return { backgroundColor: bg, borderColor: border, xpColor, trophyColor: accentBlend, medalColor };
+  }, [currentUserRanking, currentGroupRanking, palette.recycleAccent, palette.danger]);
+
+  const currentGroupIndex = useMemo(
+    () => switchableGroups.findIndex((group) => group.id === currentGroup?.id),
+    [switchableGroups, currentGroup?.id],
+  );
+
+  const showGroupFlow = groups.length > 0;
+
+  useEffect(() => {
+    if (!showGroupFlow) {
+      if (pageIndex !== 0) setPageIndex(0);
+      return;
+    }
+
+    if (!activeGroup && switchableGroups.length > 0) {
+      void setActiveGroup(switchableGroups[0].id);
+    }
+  }, [showGroupFlow, activeGroup, switchableGroups, setActiveGroup, pageIndex]);
+
+  useEffect(() => {
+    if (!showGroupFlow) return;
+    if (routeTab === "recycling") {
+      setPageIndex(1);
+      if (routeGroupId && routeGroupId !== activeGroupId) {
+        void setActiveGroup(routeGroupId);
+      }
+    }
+  }, [routeTab, routeGroupId, showGroupFlow, activeGroupId, setActiveGroup]);
 
   // recyclingTypes now comes from RecyclingTypesContext
 
@@ -244,28 +431,95 @@ export default function HomeScreen() {
     setRecyclingTypeModalVisible(false);
   };
 
-  // Ensure a convenient "descarte em ecoponto" category exists and points to maps
+  // Ensure a convenient "Descarte em ecoponto" category exists and points to maps.
+  // If a lowercased/old variant exists (e.g. "descarte em ecoponto" with 20 XP),
+  // replace it with a properly capitalized custom type with 50 XP.
   useEffect(() => {
     const ensureEcoponto = async () => {
       try {
-        const found = recyclingTypes.some((t) => String(t.type).toLowerCase() === "descarte em ecoponto");
-        if (!found) {
-          await addRecyclingType({ type: "descarte em ecoponto", icon: "map-marker", hint: "Ver locais próximos para descarte", isCustom: true });
+        const lowerKey = "descarte em ecoponto";
+        const existing = recyclingTypes.find((t) => String(t.type).trim().toLowerCase() === lowerKey);
+
+        if (existing) {
+          ecopontoEnsuredRef.current = true;
+          const needsRename = String(existing.type).trim() !== "Descarte em ecoponto";
+          const needsXp = Number(existing.xp || 0) < 50;
+
+          if ((needsRename || needsXp) && existing.isCustom) {
+            try {
+              await deleteRecyclingType(existing.id);
+            } catch {
+              // ignore
+            }
+            try {
+              await addRecyclingType({ type: "Descarte em ecoponto", icon: existing.icon || "map-marker", hint: existing.hint || "Ver locais próximos para descarte", isCustom: true, xp: 50 });
+            } catch {
+              // ignore
+            }
+          } else if ((needsRename || needsXp) && !existing.isCustom) {
+            // Default (non-custom) entry found with wrong casing/xp — add a custom corrected one.
+            try {
+              await addRecyclingType({ type: "Descarte em ecoponto", icon: existing.icon || "map-marker", hint: existing.hint || "Ver locais próximos para descarte", isCustom: true, xp: 50 });
+            } catch {
+              // ignore
+            }
+          }
+
+          return;
         }
+
+        if (ecopontoEnsuredRef.current) return;
+        ecopontoEnsuredRef.current = true;
+        await addRecyclingType({ type: "Descarte em ecoponto", icon: "map-marker", hint: "Ver locais próximos para descarte", isCustom: true, xp: 50 });
       } catch (e) {
         /* ignore */
       }
     };
+
     void ensureEcoponto();
-  }, [recyclingTypes, addRecyclingType]);
+  }, [recyclingTypes, addRecyclingType, deleteRecyclingType]);
 
   const orderedRecyclingTypes = useMemo(() => {
     const key = "descarte em ecoponto";
     const lowerKey = key.toLowerCase();
-    const found = recyclingTypes.find((t) => String(t.type).toLowerCase() === lowerKey);
-    if (!found) return recyclingTypes;
-    return [found, ...recyclingTypes.filter((t) => t.id !== found.id)];
+    const seen = new Set<string>();
+    const uniqueTypes = recyclingTypes.filter((type) => {
+      const normalizedType = String(type.type).trim().toLowerCase();
+      if (seen.has(normalizedType)) {
+        return false;
+      }
+      seen.add(normalizedType);
+      return true;
+    });
+    const found = uniqueTypes.find((t) => String(t.type).toLowerCase() === lowerKey);
+    if (!found) return uniqueTypes;
+    return [found, ...uniqueTypes.filter((t) => t.id !== found.id)];
   }, [recyclingTypes]);
+
+  const isEcopontoType = (typeName: string) => String(typeName).trim().toLowerCase() === "descarte em ecoponto";
+
+  const goToPreviousGroup = async () => {
+    if (!switchableGroups.length || currentGroupIndex <= 0) return;
+    await setActiveGroup(switchableGroups[currentGroupIndex - 1].id);
+  };
+
+  const goToNextGroup = async () => {
+    if (!switchableGroups.length || currentGroupIndex < 0 || currentGroupIndex >= switchableGroups.length - 1) return;
+    await setActiveGroup(switchableGroups[currentGroupIndex + 1].id);
+  };
+
+  const openAllGroups = () => {
+    (navigation as any).navigate("MeusGrupos");
+  };
+
+  const openCurrentGroupRanking = () => {
+    if (!currentGroup) return;
+    (navigation as any).navigate("MeusGrupos", { groupId: currentGroup.id, tab: "stats" });
+  };
+
+  const openMapsScreen = () => {
+    (navigation as any).navigate("Mapas");
+  };
 
   // Animated progress
   const animatedProgress = useRef(new Animated.Value(0)).current;
@@ -318,12 +572,15 @@ export default function HomeScreen() {
               }}
             />
             <TouchableOpacity
-              onPress={() => horizontalRef.current?.scrollTo({ x: width, animated: true })}
+              onPress={() => {
+                if (!showGroupFlow) return;
+                horizontalRef.current?.scrollTo({ x: width, animated: true });
+              }}
               style={{
                 width: 10,
                 height: 10,
                 borderRadius: 999,
-                backgroundColor: pageIndex === 1 ? palette.recycleAccent : palette.panelAlt,
+                  backgroundColor: showGroupFlow && pageIndex === 1 ? palette.recycleAccent : palette.panelAlt,
               }}
             />
           </View>
@@ -341,7 +598,36 @@ export default function HomeScreen() {
               borderColor: palette.cardBorder,
             }}
           >
-            <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+            <View style={{ position: "relative", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="notifications-outline" size={20} color={palette.textPrimary} />
+              {notificationBadgeCount > 0 ? (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -8,
+                    right: -10,
+                    minWidth: 20,
+                    height: 20,
+                    borderRadius: 999,
+                    paddingHorizontal: 5,
+                    backgroundColor: palette.recycleAccent,
+                    borderWidth: 2,
+                    borderColor: palette.panel,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    shadowColor: "#000",
+                    shadowOpacity: 0.18,
+                    shadowRadius: 3,
+                    shadowOffset: { width: 0, height: 1 },
+                    elevation: 2,
+                  }}
+                >
+                  <Text style={{ color: palette.panel, fontSize: 10, lineHeight: 12, fontWeight: "900" }}>
+                    {notificationBadgeCount === 99 ? "99+" : notificationBadgeCount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </TouchableOpacity>
         </View>
         </View>
@@ -413,6 +699,7 @@ export default function HomeScreen() {
           <QuickActions
             onPressHistory={() => (navigation as any).navigate("Registros")}
             onPressPlus={() => setModalVisible(true)}
+            showGroupControls={false}
             historyColor={inGoal ? palette.recycleAccent : palette.danger}
             plusColor={inGoal ? palette.recycleAccent : palette.danger}
             borderColor={inGoal ? "transparent" : "transparent"}
@@ -544,39 +831,70 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
-        
+      {showGroupFlow ? (
+        <View style={{ width, flex: 1 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 64, padding: 20, paddingBottom: insets.bottom + 40 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, position: "relative" }}>
+              <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                <Text style={{ color: palette.textSecondary, letterSpacing: 1, fontSize: 11, fontWeight: "700" }}>
+                  GRUPO ATIVO
+                </Text>
+                <Text style={{ fontSize: isCompactWidth ? 24 : 28, lineHeight: isCompactWidth ? 28 : 32, fontWeight: "900", color: palette.textPrimary, marginTop: 4 }}>
+                  {currentGroup?.name || "Selecione um grupo"}
+                </Text>
+                <Text style={{ color: palette.textSecondary, marginTop: 4, fontSize: 12 }}>
+                  Use os atalhos para trocar de grupo, ver todos e abrir o ranking.
+                </Text>
+              </View>
 
-      <View style={{ width, flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 64, padding: 20 }}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 12, position: "relative" }}>
-            <View style={{ flex: 1, paddingRight: 160 }}>
-              <Text style={{ color: palette.textSecondary, letterSpacing: 1, fontSize: 11, fontWeight: "700" }}>
-                RECICLAGEM
-              </Text>
-              <Text style={{ fontSize: 28, lineHeight: 32, fontWeight: "900", color: palette.textPrimary, marginTop: 4 }}>
-                Registrar ações
-              </Text>
-              <Text style={{ color: palette.textSecondary, marginTop: 4, fontSize: 12 }}>
-                Deslize para a esquerda para voltar.
-              </Text>
+              <Image
+                source={require("../assets/images/planeta.png")}
+                style={{ width: isCompactWidth ? 150 : 140, height: isCompactWidth ? 140 : 168, flexShrink: 0, marginTop: isCompactWidth ? 0 : 6 }}
+                contentFit="contain"
+              />
             </View>
 
-            <Image
-              source={require("../assets/images/planeta.png")}
-              style={{ position: "absolute", right: 12, top: 6, width: 140, height: 168 }}
-              contentFit="contain"
-            />
-          </View>
+            {currentGroup ? (
+              <TouchableOpacity onPress={openCurrentGroupRanking} activeOpacity={0.86} style={{ backgroundColor: rankingCardStyle?.backgroundColor || palette.panel, borderWidth: 1, borderColor: rankingCardStyle?.borderColor || palette.panelAlt, borderRadius: 18, padding: 13, marginBottom: 14 }}>
+                {currentUserRanking ? (
+                      (() => {
+                        const pos = currentUserRanking.position;
+                        const nameText = `#${pos} ${currentUserRanking.member.name}`;
+                        const xpText = `${currentUserRanking.member.totalXp} XP`;
+                        const styleVars = rankingCardStyle || { backgroundColor: palette.panel, borderColor: palette.panelAlt, xpColor: palette.recycleAccent, trophyColor: palette.recycleAccent };
+                        return (
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                                    {pos === 1 ? (
+                                      <MaterialCommunityIcons name="trophy" size={18} color={styleVars.trophyColor as any} />
+                                    ) : null}
+                                    {pos <= 3 ? (
+                                      <MaterialCommunityIcons name="medal" size={16} color={(styleVars as any).medalColor || (styleVars.trophyColor as any)} />
+                                    ) : null}
+                                    <Text style={{ color: palette.textPrimary, fontWeight: "800", flex: 1 }} numberOfLines={1}>{nameText}</Text>
+                                  </View>
+                            </View>
+                            <Text style={{ color: (styleVars.xpColor as string) || palette.recycleAccent, fontWeight: "800", flexShrink: 0 }}>{xpText}</Text>
+                          </View>
+                        );
+                      })()
+                    ) : (
+                      <Text style={{ color: palette.textMuted, fontSize: 12 }}>Sua posição ainda não apareceu neste grupo.</Text>
+                    )}
+              </TouchableOpacity>
+            ) : null}
 
-          <View style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.panelAlt, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, alignSelf: "flex-start", marginBottom: 8 }}>
-            <Text style={{ color: palette.textPrimary, fontWeight: "700", fontSize: 12 }}>{recyclingEntries.length} registros</Text>
-          </View>
-
-          <View style={{ flexDirection: "column", marginBottom: 14 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <QuickActions
                 onPressHistory={() => (navigation as any).navigate("Registros", { tab: "recycling" })}
                 onPressPlus={() => setRecyclingTypeModalVisible(true)}
+                onPressPrevGroup={goToPreviousGroup}
+                onPressNextGroup={goToNextGroup}
+                onPressAllGroups={openAllGroups}
+                showGroupControls={true}
+                canGoPrev={currentGroupIndex > 0}
+                canGoNext={currentGroupIndex >= 0 && currentGroupIndex < switchableGroups.length - 1}
                 historyColor={palette.recycleAccent}
                 plusColor={palette.recycleAccent}
                 borderColor={palette.recycleLine}
@@ -584,65 +902,67 @@ export default function HomeScreen() {
               />
             </View>
 
-            {orderedRecyclingTypes.map((item) => (
-              <View key={item.id} style={{ width: "100%", marginBottom: 16 }}>
-                <View style={{ backgroundColor: palette.panel, borderRadius: 16, padding: 14 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-                    <View style={{ width: 42, height: 42, borderRadius: 10, backgroundColor: palette.recycleSoft, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
-                      <MaterialCommunityIcons name={item.icon as any} size={20} color={palette.recycleAccent} />                      
-                    </View>
-                    
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{item.type}</Text>
-                      <Text style={{ color: palette.textSecondary, marginTop: 4, fontSize: 12 }}>{item.hint}</Text>
-                    </View>
-                    {(() => {
-                      const isEcoponto = String(item.type).toLowerCase().includes("ecopont");
-                      if (item.isCustom && !isEcoponto) {
-                        return (
-                          <TouchableOpacity onPress={() => {
-                            Alert.alert("Remover tipo", "Deseja remover este tipo de reciclagem personalizado?", [
-                              { text: "Cancelar", style: "cancel" },
-                              { text: "Remover", style: "destructive", onPress: async () => await deleteRecyclingType(item.id) },
-                            ]);
-                          }} style={{ marginTop: 8, alignItems: "flex-end" }}>
-                            <MaterialCommunityIcons name="trash-can-outline" size={16} color={palette.danger} />
-                          </TouchableOpacity>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </View>
-
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+              {orderedRecyclingTypes.map((item) => (
+                <View key={item.id} style={{ width: (width - 48) / 2, marginBottom: 12 }}>
                   {(() => {
-                    const isEcoponto = String(item.type).toLowerCase().includes("ecopont");
+                    const cardBg = palette.panel;
+                    const ecoponto = isEcopontoType(item.type);
+                    const border = palette.cardBorder;
+                    const iconBg = palette.panelAlt;
+                    const iconColor = palette.recycleAccent;
+                    const weightColor = palette.recycleAccent;
+                    const addColor = palette.recycleAccent;
                     return (
-                      <View style={{ flexDirection: "row", gap: 8 }}>
-                        <TouchableOpacity
-                          onPress={() => handleAddRecyclingType(item)}
-                          style={{ backgroundColor: palette.panelAlt, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, alignItems: "center" }}
-                        >
-                          <Text style={{ color: palette.textSecondary, fontWeight: "500" }}>+ registrar</Text>
-                        </TouchableOpacity>
+                      <View style={{ backgroundColor: cardBg, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: border, overflow: "hidden", minHeight: 212, justifyContent: "space-between" }}>
+                        <View style={{ marginBottom: 8, minHeight: 108, justifyContent: "flex-start" }}>
+                          <View style={{ width: 52, height: 52, borderRadius: 14, backgroundColor: iconBg, alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+                            <MaterialCommunityIcons name={item.icon as any} size={20} color={iconColor} />
+                          </View>
+                          <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 15, lineHeight: 18 }} numberOfLines={2}>{item.type}</Text>
+                          <Text style={{ color: weightColor, fontWeight: "700", marginTop: 4, fontSize: 13 }}>{item.xp} XP</Text>
+                        </View>
 
-                        {isEcoponto ? (
+                        <View style={{ height: 1, backgroundColor: border, opacity: 0.7, marginBottom: 8 }} />
+
+                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6, width: "100%", minHeight: 36 }}>
                           <TouchableOpacity
-                            onPress={() => (navigation as any).navigate("Mapas")}
-                            style={{ backgroundColor: "transparent", borderWidth: 0.4, borderColor: palette.recycleLine, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, alignItems: "center" }}
+                            onPress={() => handleAddRecyclingType(item)}
+                            style={{ flex: 1, minWidth: 0, minHeight: 32, borderWidth: 1, borderColor: addColor, paddingVertical: 5, paddingHorizontal: 8, borderRadius: 12, backgroundColor: addColor, alignItems: "center", justifyContent: "center" }}
                           >
-                            <Text style={{ color: palette.textSecondary, fontWeight: "500" }}>Ver locais</Text>
+                            <Text style={{ color: palette.panel, fontWeight: "700", fontSize: 11 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>+ adicionar</Text>
                           </TouchableOpacity>
-                        ) : null}
+
+                          {ecoponto ? (
+                            <TouchableOpacity
+                              onPress={openMapsScreen}
+                              style={{ marginTop: 8, alignItems: "center", justifyContent: "center", minHeight: 32, paddingHorizontal: 10 }}
+                            >
+                              <MaterialCommunityIcons name="map-marker-outline" size={18} color={palette.recycleAccent} />
+                            </TouchableOpacity>
+                          ) : item.isCustom ? (
+                            <TouchableOpacity
+                              onPress={() => {
+                                Alert.alert("Remover tipo", "Deseja remover este tipo de reciclagem personalizado?", [
+                                  { text: "Cancelar", style: "cancel" },
+                                  { text: "Remover", style: "destructive", onPress: async () => await deleteRecyclingType(item.id) },
+                                ]);
+                              }}
+                              style={{ marginTop: 8, alignItems: "flex-end" }}
+                            >
+                              <MaterialCommunityIcons name="trash-can-outline" size={16} color={palette.danger} />
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
                       </View>
                     );
                   })()}
                 </View>
-              </View>
-            ))}
-          </View>
-
-        </ScrollView>
-      </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      ) : null}
 
     </ScrollView>
     </View>

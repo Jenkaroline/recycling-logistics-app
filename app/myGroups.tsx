@@ -1,19 +1,80 @@
 import { Ionicons } from "@expo/vector-icons";
-import { collection, getDocs, limit, query, where } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { Image } from "expo-image";
-import { useNavigation, DrawerActions } from "@react-navigation/native";
 import { useDrawerStatus } from "@react-navigation/drawer";
+import { DrawerActions, useNavigation, useRoute } from "@react-navigation/native";
+import { Image } from "expo-image";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { auth } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
 import { useRecycling } from "../src/RecyclingContext";
+import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
-import { auth, db } from "../service/firebaseConfig";
+import { translateFirebaseError } from "../src/firebaseErrorMapper";
+import { db } from "../service/firebaseConfig";
 
 type GroupTab = "stats" | "feed" | "chat";
 type ManageAction = "rename" | "addMember" | "critical" | null;
+
+type GroupEvidenceEntry = {
+  id: string;
+  type: string;
+  typeId?: string | null;
+  groupId: string;
+  authorId?: string | null;
+  authorName?: string | null;
+  xpEarned?: number;
+  notes?: string | null;
+  createdAt: string;
+};
+
+function normalizeDateString(value: unknown) {
+  const minValidTimestamp = Date.UTC(2000, 0, 1);
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime()) && parsed.getTime() >= minValidTimestamp) {
+      return parsed.toISOString();
+    }
+  }
+
+  if (value && typeof value === "object" && "toDate" in value && typeof (value as { toDate?: unknown }).toDate === "function") {
+    const parsed = (value as { toDate: () => Date }).toDate();
+    if (parsed.getTime() >= minValidTimestamp) {
+      return parsed.toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+}
+
+function parseChatDate(value: unknown) {
+  const normalized = normalizeDateString(value);
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getLocalDayKey(date: Date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+function formatChatDayLabel(date: Date) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatChatTimeLabel(value: unknown) {
+  const date = parseChatDate(value);
+  if (!date) return "";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 type GroupPalette = {
   bg: string;
   panel: string;
@@ -28,7 +89,6 @@ type GroupPalette = {
   dangerPanel: string;
   dangerBorder: string;
   dangerText: string;
-  dangerSubtext: string;
   cardBorder: string;
   modalSurface: string;
   modalInput: string;
@@ -37,10 +97,12 @@ type GroupPalette = {
 export default function MyGroupsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const { darkModeEnabled } = useThemePreference();
-  const { entries: recyclingEntries } = useRecycling();
+  const { addAction: addRecyclingAction } = useRecycling();
+  const { types: recyclingTypes } = useRecyclingTypes();
   const {
     groups,
     rankedMembers,
@@ -52,7 +114,9 @@ export default function MyGroupsScreen() {
     updateGroupName,
     deleteGroup,
     addChatMessage,
-    addMemberToActiveGroup,
+    sendGroupInvitation,
+    activeGroupId,
+    awardXpToActiveGroup,
   } = useRecyclingCompetition();
 
   const [createVisible, setCreateVisible] = useState(false);
@@ -64,6 +128,9 @@ export default function MyGroupsScreen() {
   const [manageAction, setManageAction] = useState<ManageAction>(null);
   const [manageGroupName, setManageGroupName] = useState("");
   const [manageMemberName, setManageMemberName] = useState("");
+  const [groupEvidenceEntries, setGroupEvidenceEntries] = useState<GroupEvidenceEntry[]>([]);
+  const [recordModalVisible, setRecordModalVisible] = useState(false);
+  const chatScrollRef = useRef<ScrollView | null>(null);
 
   const palette: GroupPalette = darkModeEnabled
     ? {
@@ -80,7 +147,6 @@ export default function MyGroupsScreen() {
         dangerPanel: "#2b1821",
         dangerBorder: "#5f3140",
         dangerText: "#fca5a5",
-        dangerSubtext: "#e9b9c3",
         cardBorder: "#1e3a57",
         modalSurface: "#0c2740",
         modalInput: "#123252",
@@ -99,7 +165,6 @@ export default function MyGroupsScreen() {
         dangerPanel: "#fdecef",
         dangerBorder: "#f4c6cf",
         dangerText: "#b3314d",
-        dangerSubtext: "#8a4a59",
         cardBorder: "#d7e5f2",
         modalSurface: "#ffffff",
         modalInput: "#f3f8fd",
@@ -126,6 +191,51 @@ export default function MyGroupsScreen() {
     [groups, selectedGroupId],
   );
 
+  useEffect(() => {
+    const routeGroupId = route?.params?.groupId;
+    const routeTab = route?.params?.tab;
+    if (!routeGroupId) return;
+    if (!groups.some((group) => group.id === routeGroupId)) return;
+
+    setSelectedGroupId(routeGroupId);
+    setSelectedTab(routeTab === "stats" ? "stats" : "stats");
+    void setActiveGroup(routeGroupId);
+  }, [route?.params?.groupId, route?.params?.tab, groups, setActiveGroup]);
+
+  useEffect(() => {
+    if (!selectedGroup?.id) {
+      setGroupEvidenceEntries([]);
+      return;
+    }
+
+    const evidenceQuery = query(
+      collection(db, "groupRecyclingActions", selectedGroup.id, "entries"),
+      orderBy("createdAt", "desc"),
+    );
+
+    const unsubscribe = onSnapshot(
+      evidenceQuery,
+      (snapshot) => {
+        setGroupEvidenceEntries(
+          snapshot.docs.map((snap) => ({
+            id: snap.id,
+            ...(snap.data() as Omit<GroupEvidenceEntry, "id">),
+            createdAt: normalizeDateString((snap.data() as { createdAt?: unknown }).createdAt),
+          })),
+        );
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setGroupEvidenceEntries([]);
+          return;
+        }
+        console.warn("Group evidence listener failed:", error);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [selectedGroup?.id]);
+
   const currentUserId = auth.currentUser?.uid || null;
   const currentUserName = auth.currentUser?.displayName?.trim() || auth.currentUser?.email?.split("@")[0] || "Você";
   const canManageSelectedGroup = Boolean(
@@ -151,17 +261,62 @@ export default function MyGroupsScreen() {
 
   const groupFeed = useMemo(() => {
     if (!selectedGroup) return [];
-    return recyclingEntries
-      .filter((entry) => entry.groupId === selectedGroup.id)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [recyclingEntries, selectedGroup]);
+    return groupEvidenceEntries;
+  }, [groupEvidenceEntries, selectedGroup]);
+
+  const orderedRecyclingTypes = useMemo(() => {
+    const key = "descarte em ecoponto";
+    const lowerKey = key.toLowerCase();
+    const found = recyclingTypes.find((type) => String(type.type).toLowerCase() === lowerKey);
+    if (!found) return recyclingTypes;
+    return [found, ...recyclingTypes.filter((type) => type.id !== found.id)];
+  }, [recyclingTypes]);
 
   const groupChat = useMemo(() => {
-    if (!selectedGroup) return [];
+    const chatGroupId = activeGroupId || selectedGroup?.id || null;
+    if (!chatGroupId) return [];
     return chatMessages
-      .filter((message) => message.groupId === selectedGroup.id)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  }, [chatMessages, selectedGroup]);
+      .filter((message) => String(message.groupId) === String(chatGroupId))
+      .sort((a, b) => {
+        const firstDate = parseChatDate(a.createdAt)?.getTime() ?? 0;
+        const secondDate = parseChatDate(b.createdAt)?.getTime() ?? 0;
+        return firstDate - secondDate;
+      });
+  }, [chatMessages, selectedGroup, activeGroupId]);
+
+  const chatTimeline = useMemo(() => {
+    const rows: Array<
+      | { type: "day"; id: string; label: string }
+      | { type: "message"; id: string; message: (typeof groupChat)[number] }
+    > = [];
+
+    let lastDayKey: string | null = null;
+
+    groupChat.forEach((message) => {
+      const messageDate = parseChatDate(message.createdAt);
+      const dayKey = messageDate ? getLocalDayKey(messageDate) : null;
+
+      if (messageDate && dayKey !== lastDayKey) {
+        rows.push({ type: "day", id: `day-${dayKey}`, label: formatChatDayLabel(messageDate) });
+        lastDayKey = dayKey;
+      }
+
+      rows.push({ type: "message", id: message.id, message });
+    });
+
+    return rows;
+  }, [groupChat]);
+
+  useEffect(() => {
+    if (selectedTab !== "chat") return;
+    chatScrollRef.current?.scrollToEnd({ animated: true });
+  }, [groupChat.length, selectedTab]);
+
+  useEffect(() => {
+    if (selectedTab === "chat") {
+      setRecordModalVisible(false);
+    }
+  }, [selectedTab]);
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) return;
@@ -215,11 +370,6 @@ export default function MyGroupsScreen() {
     setManageMenuVisible(true);
   };
 
-  const openManageAction = (action: Exclude<ManageAction, null>) => {
-    setManageMenuVisible(false);
-    setManageAction(action);
-  };
-
   const closeManageAction = () => {
     setManageAction(null);
     setManageMenuVisible(false);
@@ -233,7 +383,7 @@ export default function MyGroupsScreen() {
     setManageGroupName(nextName);
     setManageAction(null);
     setManageMenuVisible(false);
-    Alert.alert("Nome atualizado", `O grupo agora se chama "${nextName}".`);
+    Alert.alert("Nome atualizado", `O grupo agora se chama \"${nextName}\".`);
   };
 
   const handleAddMember = async () => {
@@ -248,36 +398,89 @@ export default function MyGroupsScreen() {
     }
 
     try {
-      const usersQuery = query(
-        collection(db, "users"),
-        where("email", "==", inputEmail),
-        limit(1),
-      );
-      const userSnapshot = await getDocs(usersQuery);
+      const result = await sendGroupInvitation(inputEmail);
+      setManageAction(null);
+      setManageMenuVisible(false);
+      setManageMemberName("");
 
-      if (userSnapshot.empty) {
-        Alert.alert("Usuário não encontrado", "Este e-mail não está cadastrado no app.");
+      if (!result.persisted || !result.recipientFound || !result.delivered) {
+        Alert.alert("Falha ao enviar", `O e-mail ${inputEmail} precisa estar cadastrado no app para receber o convite.`);
         return;
       }
 
-      const userData = userSnapshot.docs[0].data() as {
-        username?: string;
-      };
-      const memberName = userData.username?.trim() || inputEmail.split("@")[0];
-      await addMemberToActiveGroup(memberName);
-      setManageAction(null);
-      setManageMenuVisible(false);
-    } catch {
-      Alert.alert("Falha na validação", "Não foi possível validar o e-mail agora. Tente novamente.");
-      return;
-    }
+      Alert.alert("Convite enviado", "A pessoa receberá o convite na tela de notificações.");
+    } catch (error) {
+      const errorCode = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
 
-    setManageMemberName("");
-    Alert.alert("Membro adicionado", "Pessoa incluída no grupo com sucesso.");
+      if (errorCode === "same-email") {
+        Alert.alert("E-mail inválido", "Você não pode convidar o seu próprio e-mail.");
+        return;
+      }
+
+      if (errorCode === "invalid-email" || errorMessage === "invalid-email") {
+        Alert.alert("E-mail inválido", "Digite um e-mail válido para enviar o convite.");
+        return;
+      }
+
+      if (errorCode === "no-active-group") {
+        Alert.alert("Grupo indisponível", "Selecione um grupo ativo antes de enviar convites.");
+        return;
+      }
+
+      if (errorCode === "not-owner") {
+        Alert.alert("Sem permissão", "Apenas o dono do grupo pode enviar convites.");
+        return;
+      }
+
+      if (errorCode === "already-member") {
+        Alert.alert("Pessoa já no grupo", "Essa pessoa já aceitou e faz parte do grupo. Não é possível enviar o convite novamente.");
+        return;
+      }
+
+      if (errorCode === "invite-pending") {
+        Alert.alert("Convite já enviado", "Já existe um convite pendente para esta pessoa. Aguarde ela responder antes de tentar novamente.");
+        return;
+      }
+
+      if (errorCode === "not-found" || errorMessage === "not-found") {
+        Alert.alert("Usuário não cadastrado", `O e-mail ${inputEmail} não está cadastrado no app.`);
+        return;
+      }
+
+      if (errorCode === "lookup-failed") {
+        Alert.alert("Falha na validação", "Não foi possível validar o e-mail agora. Verifique sua conexão e tente novamente.");
+        return;
+      }
+
+      if (errorCode === "delivery-failed") {
+        Alert.alert("Falha ao enviar", "Encontramos a pessoa, mas não conseguimos entregar o convite na tela de notificações. Tente novamente.");
+        return;
+      }
+
+      console.error("[MyGroups] failed to send invitation", {
+        email: inputEmail,
+        groupId: selectedGroup.id,
+        errorCode: errorCode || "unknown",
+      });
+
+      Alert.alert("Falha inesperada", translateFirebaseError(error));
+    }
   };
 
-  const renameDisabled = !manageGroupName.trim() || manageGroupName.trim() === selectedGroup?.name;
-  const addDisabled = !manageMemberName.trim();
+  const handleAddGroupRecord = async (item: { id: string; type: string; xp: number }) => {
+    if (!selectedGroup) return;
+    const currentUser = auth.currentUser;
+    await addRecyclingAction({
+      type: item.type,
+      typeId: item.id,
+      groupId: selectedGroup.id,
+      authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
+      xpEarned: item.xp,
+    });
+    await awardXpToActiveGroup(item.xp);
+    navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
+  };
 
   const sendMessage = async () => {
     if (!messageText.trim()) return;
@@ -287,7 +490,6 @@ export default function MyGroupsScreen() {
 
   const renderGroupList = () => (
     <ScrollView contentContainerStyle={{ paddingTop: insets.top + 48, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
-
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>GRUPOS</Text>
@@ -325,7 +527,6 @@ export default function MyGroupsScreen() {
                     borderRadius: 999,
                     paddingHorizontal: 10,
                     paddingVertical: 4,
-                    
                   }}
                 >
                   <Text style={{ color: group.isActive ? palette.recycleAccent : palette.dangerText, fontSize: 11, fontWeight: "700" }}>
@@ -336,7 +537,6 @@ export default function MyGroupsScreen() {
               <Text style={{ color: palette.textSecondary, fontSize: 12 }}>
                 {group.totalXp} XP • {group.totalActions} registro(s) • {group.members.length} membro(s)
               </Text>
-
             </TouchableOpacity>
           ))}
         </View>
@@ -354,7 +554,10 @@ export default function MyGroupsScreen() {
     ];
 
     return (
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 28 }}>
+      <ScrollView
+        scrollEnabled={selectedTab !== "chat"}
+        contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 28 }}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <TouchableOpacity
             onPress={() => setSelectedGroupId(null)}
@@ -450,7 +653,7 @@ export default function MyGroupsScreen() {
                     <Text style={{ color: palette.recycleAccent, fontWeight: "800" }}>{entry.xpEarned || 0} XP</Text>
                   </View>
                   <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 8 }}>
-                    {entry.authorName || "Membro"} • {new Date(entry.createdAt).toLocaleString("pt-BR")}
+                    {entry.authorName || "Membro"} • {new Date(normalizeDateString(entry.createdAt)).toLocaleString("pt-BR")}
                   </Text>
                   {entry.notes ? (
                     <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 18 }}>{entry.notes}</Text>
@@ -488,8 +691,52 @@ export default function MyGroupsScreen() {
                   </Text>
                 </View>
               ) : (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 4, gap: 10 }}>
-                  {groupChat.map((message) => {
+                <ScrollView
+                  ref={chatScrollRef}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  onContentSizeChange={() => {
+                    if (selectedTab === "chat") {
+                      chatScrollRef.current?.scrollToEnd({ animated: true });
+                    }
+                  }}
+                  contentContainerStyle={{
+                    flexGrow: 1,
+                    justifyContent: "flex-end",
+                    paddingTop: 4,
+                    paddingBottom: 20,
+                    gap: 10,
+                  }}
+                >
+                  <View style={{ alignItems: "center" }}>
+                    <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "400" }}>
+                      Grupo criado em {new Date(selectedGroup.createdAt).toLocaleDateString("pt-BR")}.
+                    </Text>
+                  </View>
+
+                  {chatTimeline.map((item) => {
+                    if (item.type === "day") {
+                      return (
+                        <View key={item.id} style={{ alignItems: "center", marginVertical: 6 }}>
+                          <View
+                            style={{
+                              backgroundColor: palette.panelAlt,
+                              borderColor: palette.cardBorder,
+                              borderWidth: 1,
+                              borderRadius: 999,
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                            }}
+                          >
+                            <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "700", textTransform: "capitalize" }}>
+                              {item.label}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    }
+
+                    const message = item.message;
                     const isMine = message.authorId === currentUserId || message.authorName === currentUserName;
                     const initials = (message.authorName || "U")
                       .split(" ")
@@ -500,7 +747,7 @@ export default function MyGroupsScreen() {
 
                     return (
                       <View
-                        key={message.id}
+                        key={item.id}
                         style={{
                           flexDirection: isMine ? "row-reverse" : "row",
                           alignItems: "flex-end",
@@ -540,7 +787,7 @@ export default function MyGroupsScreen() {
                             </Text>
                           </View>
                           <Text style={{ color: palette.textMuted, fontSize: 10, marginTop: 4, marginHorizontal: 4 }}>
-                            {new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                            {formatChatTimeLabel(message.createdAt)}
                           </Text>
                         </View>
                       </View>
@@ -595,6 +842,7 @@ export default function MyGroupsScreen() {
             </View>
           </View>
         ) : null}
+
       </ScrollView>
     );
   };
@@ -604,7 +852,7 @@ export default function MyGroupsScreen() {
       {!selectedGroup && (
         <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
           <View style={{ height: insets.top + 28 }} />
-            <View style={{ height: 64 - insets.top - 28, paddingHorizontal: 12, justifyContent: "center" }}>
+          <View style={{ height: 64 - insets.top - 28, paddingHorizontal: 12, justifyContent: "center" }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <TouchableOpacity
                 onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
@@ -634,6 +882,32 @@ export default function MyGroupsScreen() {
       )}
 
       {selectedGroup ? renderDetail() : renderGroupList()}
+
+      {selectedGroup && selectedTab !== "chat" ? (
+        <View pointerEvents="box-none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 90 }}>
+          <TouchableOpacity
+            onPress={() => setRecordModalVisible(true)}
+            style={{
+              position: "absolute",
+              right: 16,
+              bottom: insets.bottom + 16,
+              width: 54,
+              height: 54,
+              borderRadius: 18,
+              backgroundColor: palette.recycleAccent,
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: "#000",
+              shadowOpacity: 0.16,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              elevation: 6,
+            }}
+          >
+            <Ionicons name="add" size={24} color={palette.panel} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <Modal visible={createVisible} transparent animationType="slide">
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
@@ -685,13 +959,7 @@ export default function MyGroupsScreen() {
             <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
               <TouchableOpacity
                 onPress={() => setManageAction((current) => (current === "rename" ? null : "rename"))}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 14,
-                  paddingVertical: 16,
-                }}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
               >
                 <View style={{ flex: 1, paddingRight: 12 }}>
                   <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Renomear grupo</Text>
@@ -716,26 +984,20 @@ export default function MyGroupsScreen() {
                     theme={inputTheme}
                     style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
                   />
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <Button
-                      mode="contained"
-                      contentStyle={{ height: 46, paddingHorizontal: 8 }}
-                      buttonColor={palette.panelAlt}
-                      textColor={palette.textMuted}
-                      onPress={async () => {
-                        if (renameDisabled) {
-                          Alert.alert("Preencha o nome", "Informe um nome válido e diferente do atual.");
-                          return;
-                        }
-                        await handleRenameGroup();
-                        setManageAction(null);
-                        setManageMenuVisible(false);
-                      }}
-                      style={{ borderRadius: 14, borderWidth: 0.2, borderColor: palette.textMuted, justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8, elevation: 0 }}
-                    >
-                      Salvar
-                    </Button>
-                  </View>
+                  <Button
+                    mode="contained"
+                    onPress={async () => {
+                      if (!manageGroupName.trim() || manageGroupName.trim() === selectedGroup?.name) {
+                        Alert.alert("Preencha o nome", "Informe um nome válido e diferente do atual.");
+                        return;
+                      }
+                      await handleRenameGroup();
+                    }}
+                    buttonColor={palette.recycleAccent}
+                    textColor={palette.panel}
+                  >
+                    Salvar nome
+                  </Button>
                 </View>
               ) : null}
             </View>
@@ -743,17 +1005,11 @@ export default function MyGroupsScreen() {
             <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
               <TouchableOpacity
                 onPress={() => setManageAction((current) => (current === "addMember" ? null : "addMember"))}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 14,
-                  paddingVertical: 16,
-                }}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
               >
                 <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Adicionar pessoas</Text>
-                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 10 }}>Informe um e-mail cadastrado no app.</Text>
+                  <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Enviar convite</Text>
+                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>Informe um e-mail cadastrado no app para enviar um convite.</Text>
                 </View>
                 <Ionicons name={manageAction === "addMember" ? "chevron-up" : "person-add-outline"} size={20} color={palette.textSecondary} />
               </TouchableOpacity>
@@ -775,26 +1031,20 @@ export default function MyGroupsScreen() {
                     theme={inputTheme}
                     style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
                   />
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <Button
-                      mode="contained"
-                      contentStyle={{ height: 46, paddingHorizontal: 8 }}
-                      buttonColor={palette.panelAlt}
-                      textColor={palette.textMuted}
-                      onPress={async () => {
-                        if (addDisabled) {
-                          Alert.alert("Preencha o e-mail", "Informe o e-mail da pessoa a ser adicionada.");
-                          return;
-                        }
-                        await handleAddMember();
-                        setManageAction(null);
-                        setManageMenuVisible(false);
-                      }}
-                      style={{ borderRadius: 14, borderWidth: 0.2, borderColor: palette.textMuted, justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8, elevation: 0 }}
-                    >
-                      Salvar
-                    </Button>
-                  </View>
+                  <Button
+                    mode="contained"
+                    onPress={async () => {
+                      if (!manageMemberName.trim()) {
+                        Alert.alert("Preencha o e-mail", "Informe o e-mail da pessoa para enviar o convite.");
+                        return;
+                      }
+                      await handleAddMember();
+                    }}
+                    buttonColor={palette.recycleAccent}
+                    textColor={palette.panel}
+                  >
+                    Enviar convite
+                  </Button>
                 </View>
               ) : null}
             </View>
@@ -802,13 +1052,7 @@ export default function MyGroupsScreen() {
             <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.dangerBorder, backgroundColor: palette.dangerPanel }}>
               <TouchableOpacity
                 onPress={() => setManageAction((current) => (current === "critical" ? null : "critical"))}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingHorizontal: 14,
-                  paddingVertical: 16,
-                }}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
               >
                 <View style={{ flex: 1, paddingRight: 12 }}>
                   <Text style={{ color: palette.dangerText, fontWeight: "700" }}>Ações críticas</Text>
@@ -918,13 +1162,89 @@ export default function MyGroupsScreen() {
                     </View>
                     <Ionicons name="trash-outline" size={20} color={palette.dangerText} />
                   </TouchableOpacity>
-
                 </View>
               ) : null}
             </View>
           </ScrollView>
         </View>
       </Modal>
+
+      <Modal visible={recordModalVisible} transparent animationType="fade" onRequestClose={() => setRecordModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }} pointerEvents="box-none">
+          <View
+            style={{
+              position: "absolute",
+              right: 16,
+              bottom: insets.bottom + 16,
+              width: 320,
+              maxWidth: "92%",
+              backgroundColor: palette.modalSurface,
+              borderRadius: 20,
+              borderWidth: 1,
+              borderColor: palette.cardBorder,
+              padding: 16,
+              maxHeight: "78%",
+              shadowColor: "#000",
+              shadowOpacity: 0.18,
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 10 },
+              elevation: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>REGISTRAR</Text>
+                <Text style={{ color: palette.textPrimary, fontSize: 20, fontWeight: "900", marginTop: 2 }}>Adicionar evidência</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setRecordModalVisible(false)}
+                style={{ width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}
+              >
+                <Ionicons name="close" size={18} color={palette.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 12 }}>
+              Escolha uma ação para registrar XP no grupo.
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 6 }}>
+              {orderedRecyclingTypes.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  onPress={async () => {
+                    await handleAddGroupRecord(item);
+                    setRecordModalVisible(false);
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: 14,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: palette.cardBorder,
+                    backgroundColor: palette.panel,
+                  }}
+                >
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 14 }} numberOfLines={1}>
+                      {item.type}
+                    </Text>
+                    <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }} numberOfLines={2}>
+                      {item.hint || "Registro de evidência."}
+                    </Text>
+                  </View>
+                  <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: palette.recycleSoft }}>
+                    <Text style={{ color: palette.recycleAccent, fontWeight: "800", fontSize: 11 }}>{item.xp} XP</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }

@@ -34,10 +34,10 @@ import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
 import ResetPasswordScreen from "./auth/resetPassword";
 import ResetPasswordConfirmScreen from "./auth/resetPasswordConfirm";
-import MeusGruposScreen from "./myGroups";
+import MeusGruposScreen from "./myGroups.tsx";
 import HomeScreen from "./home";
 import RecordsScreen from "./records";
-import NotificationsScreen from "./notifications";
+import NotificationsScreen from "../src/NotificationsScreen";
 import SettingsScreen from "./settings";
 import StatisticsScreen from "./statistics";
 
@@ -327,8 +327,8 @@ export default function MainNavigator() {
         <PlasticConsumptionProvider>
           <RecyclingProvider>
             <RecyclingTypesProvider>
-              <RecyclingCompetitionProvider>
-                <SocialProvider>
+              <SocialProvider>
+                <RecyclingCompetitionProvider>
                   <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
                     <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
                     <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
@@ -341,8 +341,8 @@ export default function MainNavigator() {
                     />
                     <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
                   </Stack.Navigator>
-                </SocialProvider>
-              </RecyclingCompetitionProvider>
+                </RecyclingCompetitionProvider>
+              </SocialProvider>
             </RecyclingTypesProvider>
           </RecyclingProvider>
         </PlasticConsumptionProvider>

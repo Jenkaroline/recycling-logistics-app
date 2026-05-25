@@ -9,6 +9,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { auth, db } from "../service/firebaseConfig";
@@ -19,6 +20,7 @@ type RecyclingAction = {
   type: string;
   typeId?: string;
   groupId?: string | null;
+  authorId?: string;
   authorName?: string;
   xpEarned?: number;
   notes?: string;
@@ -31,6 +33,7 @@ type AddActionInput =
       type: string;
       typeId?: string;
       groupId?: string | null;
+      authorId?: string;
       authorName?: string;
       xpEarned?: number;
       notes?: string;
@@ -88,16 +91,26 @@ export function RecyclingProvider({ children }: { children: React.ReactNode }) {
         orderBy("createdAt", "desc"),
       );
 
-      unsubscribe = onSnapshot(actionsQuery, (snapshot) => {
-        setEntries(
-          snapshot.docs.map((snap) =>
-            normalizeAction({
-              id: snap.id,
-              ...(snap.data() as Omit<RecyclingAction, "id">),
-            }),
-          ),
-        );
-      });
+      unsubscribe = onSnapshot(
+        actionsQuery,
+        (snapshot) => {
+          setEntries(
+            snapshot.docs.map((snap) =>
+              normalizeAction({
+                id: snap.id,
+                ...(snap.data() as Omit<RecyclingAction, "id">),
+              }),
+            ),
+          );
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setEntries([]);
+            return;
+          }
+          console.warn("Recycling actions listener failed:", error);
+        },
+      );
     };
 
     bindForUid(auth.currentUser?.uid || null);
@@ -117,19 +130,28 @@ export function RecyclingProvider({ children }: { children: React.ReactNode }) {
     const uid = currentUidRef.current;
     if (!uid) return;
 
-    await addDoc(collection(db, "users", uid, "recyclingActions"), {
+    const userActionRef = doc(collection(db, "users", uid, "recyclingActions"));
+    const basePayload = {
       type: payload.type,
       typeId: payload.typeId || null,
       groupId: payload.groupId ?? null,
+      authorId: payload.authorId || uid,
       authorName: payload.authorName || null,
       xpEarned: Number(payload.xpEarned || 0),
       notes: payload.notes || null,
       createdAt: serverTimestamp(),
-    });
+    };
+
+    await setDoc(userActionRef, basePayload);
+
+    if (payload.groupId) {
+      await setDoc(doc(collection(db, "groupRecyclingActions", payload.groupId, "entries")), basePayload);
+    }
+
     void recordAuditEvent({
       eventType: "create",
       resourceType: "recycling_action",
-      resourceId: actionId,
+      resourceId: userActionRef.id,
       payload: {
         type: payload.type,
         typeId: payload.typeId || null,

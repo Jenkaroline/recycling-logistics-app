@@ -144,6 +144,7 @@ export default function RegisterScreen() {
               uid: userCredential.user.uid,
               username: username.trim(),
               email: email,
+              emailLower: email.trim().toLowerCase(),
               avatarUrl: "",
               bio: "",
               followersCount: 0,
