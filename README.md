@@ -32,3 +32,10 @@ O projeto também está alinhado ao Objetivo de Desenvolvimento Sustentável 14 
 ## Propósito
 
 Este projeto foi criado como parte de um trabalho universitário focado em desenvolvimento mobile, sustentabilidade e exploração de soluções tecnológicas para desafios ambientais.
+
+## Integrantes
+
+- Gustavo Henrique Mendes de Oliveira
+- Jennifer Karoline Oliveira Silva
+- João Victor Merlo Braga
+- Rayan Marçal de Morais
