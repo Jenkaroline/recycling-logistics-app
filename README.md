@@ -12,22 +12,22 @@ O projeto também está alinhado ao Objetivo de Desenvolvimento Sustentável 14 
 
 ## Funcionalidades
 
-- Cadastro e autenticação de usuários;
-- Diferentes perfis de usuário (coletor, motorista, centro de reciclagem);
-- Solicitação de coleta de materiais recicláveis;
-- Conexão entre coletores e motoristas para transporte;
-- Gestão básica do fluxo logístico de reciclagem.
+- Cadastro e autenticação de usuários
+- Diferentes perfis de usuário (coletor, motorista, centro de reciclagem)
+- Solicitação de coleta de materiais recicláveis
+- Conexão entre coletores e motoristas para transporte
+- Gestão básica do fluxo logístico de reciclagem
 
 ## Tecnologias
 
-- React Native;
-- Expo;
-- Autenticação Firebase;
-- React Native Paper.
+- React Native
+- Expo
+- Autenticação Firebase
+- React Native Paper
 
 ## Status do Projeto
 
-🚧 Em desenvolvimento.
+🚧 Em desenvolvimento
 
 ## Propósito
 
