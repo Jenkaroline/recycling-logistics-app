@@ -12,6 +12,7 @@ import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import { captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { useAppNotifications } from "../src/useAppNotifications";
 import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -63,6 +64,7 @@ function QuickActions({
       >
         <MaterialCommunityIcons name="history" size={18} color={historyColor} />
       </TouchableOpacity>
+      
 
       <TouchableOpacity
         onPress={onPressPlus}
@@ -79,6 +81,7 @@ function QuickActions({
       >
         <MaterialCommunityIcons name="plus" size={18} color={plusColor} />
       </TouchableOpacity>
+      
 
       {showGroupControls ? (
         <>
@@ -227,6 +230,10 @@ export default function HomeScreen() {
     [entries],
   );
 
+  const hasEntryToday = useMemo(() => {
+  return entries.some((entry) => toLocalDayKey(entry.createdAt) === currentDayKey);
+  }, [entries, currentDayKey]);
+
   const handleAddCategory = async () => {
     const weight = Number(newCategoryWeight.replace(",", "."));
     if (!newCategoryName.trim() || !weight || weight <= 0) {
@@ -280,6 +287,7 @@ export default function HomeScreen() {
   const inGoal = heroGoal ? todayTotal <= heroGoal : true;
   const [goalModalVisible, setGoalModalVisible] = useState(false);
   const [goalInput, setGoalInput] = useState(String(goalGrams ?? ""));
+  const [goalLabel, setGoalLabel] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const horizontalRef = useRef<ScrollView>(null);
   const routeTab = route?.params?.tab;
@@ -406,12 +414,18 @@ export default function HomeScreen() {
   // recyclingTypes now comes from RecyclingTypesContext
 
   const handleAddRecyclingType = async (item: { id: string; type: string; xp: number }) => {
+    if (!activeGroupId) return;
+
+    const photoUrl = await captureRecyclingEvidencePhoto();
+    if (!photoUrl) return;
+
     const currentUser = auth.currentUser;
     await addRecyclingAction({
       type: item.type,
       typeId: item.id,
       xpEarned: item.xp,
       groupId: activeGroupId,
+      photoUrl,
       authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
     });
     await awardXpToActiveGroup(item.xp);
@@ -681,16 +695,6 @@ export default function HomeScreen() {
               <Text style={{ color: inGoal ? palette.recycleAccent : palette.danger, fontWeight: "700", fontSize: 12 }}>{inGoal ? "Dentro da meta" : "Meta excedida"}</Text>
             </View>
             <View>
-            <View style={{ height: 10, backgroundColor: palette.panelAlt, borderRadius: 999, overflow: "hidden" }}>
-              <Animated.View
-                style={{
-                  width: animatedProgress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
-                  height: "100%",
-                  backgroundColor: inGoal ? palette.recycleAccent : palette.danger,
-                }}
-              />
-            </View>
-            <Text onPress={() => { setGoalInput(String(goalGrams ?? "")); setGoalModalVisible(true); }} style={{ color: inGoal ? palette.recycleAccent : palette.danger, marginTop: 8, fontSize: 12, fontWeight: "700" }}>meta: {heroGoal}g</Text>
           </View>
         </View>
 
@@ -705,7 +709,41 @@ export default function HomeScreen() {
             borderColor={inGoal ? "transparent" : "transparent"}
             backgroundColor={inGoal ? "transparent" : "transparent"}
           />
+          <TouchableOpacity
+          onPress={() => {
+            if (hasEntryToday) {
+              Alert.alert(
+                "Meta bloqueada",
+                "Você já registrou consumo hoje. A meta só pode ser editada no início de um novo dia.",
+                [{ text: "Entendi", style: "cancel" }]
+              );
+              return;
+            }
+            setGoalInput(String(goalGrams ?? ""));
+            setGoalLabel("");
+            setGoalModalVisible(true);
+          }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            alignSelf: "flex-end",
+            paddingVertical: 6,
+            paddingHorizontal: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: hasEntryToday ? palette.cardBorder : (inGoal ? palette.recycleLine : palette.consLine),
+            backgroundColor: hasEntryToday ? palette.panelAlt : (inGoal ? palette.recycleSoft : palette.consSoft),
+            opacity: hasEntryToday ? 0.6 : 1,
+          }}
+        >
+          <MaterialCommunityIcons name="target" size={14} color={inGoal ? palette.recycleAccent : palette.danger} />
+          <Text style={{ fontSize: 12, fontWeight: "700", color: inGoal ? palette.recycleAccent : palette.danger }}>
+            Meta: {heroGoal}g
+          </Text>
+        </TouchableOpacity>
         </View>
+        
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
           {categories.map((category) => (
@@ -788,35 +826,134 @@ export default function HomeScreen() {
       </Modal>
       
       <Modal visible={goalModalVisible} transparent={true} animationType="slide">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: palette.modalSurface, borderColor: palette.panelAlt, borderWidth: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, minHeight: 220 }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: palette.textPrimary }}>Editar meta diária (g)</Text>
+  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+    <View style={{ backgroundColor: palette.modalSurface, borderColor: palette.panelAlt, borderWidth: 1, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: insets.bottom + 24 }}>
+      
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <View>
+          <Text style={{ fontSize: 18, fontWeight: "800", color: palette.textPrimary }}>Meta diária de plástico</Text>
+          <Text style={{ fontSize: 12, color: palette.textMuted, marginTop: 2 }}>Defina quanto plástico você quer limitar por dia.</Text>
+        </View>
+        <TouchableOpacity onPress={() => setGoalModalVisible(false)} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+          <MaterialCommunityIcons name="close" size={16} color={palette.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
-            <TextInput label="Meta em gramas" value={goalInput} onChangeText={setGoalInput} keyboardType="numeric" mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput }} />
+      {/* Presets */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {[
+          { label: "Mínimo", value: 50, hint: "50g" },
+          { label: "Moderado", value: 100, hint: "100g" },
+          { label: "Flexível", value: 200, hint: "200g" },
+          { label: "Alto", value: 500, hint: "500g" },
+        ].map((preset) => {
+          const selected = goalInput === String(preset.value);
+          return (
+            <TouchableOpacity
+              key={preset.value}
+              onPress={() => { setGoalInput(String(preset.value)); setGoalLabel(preset.label); }}
+              style={{
+                paddingVertical: 8,
+                paddingHorizontal: 14,
+                borderRadius: 12,
+                borderWidth: 1.5,
+                borderColor: selected ? palette.recycleAccent : palette.cardBorder,
+                backgroundColor: selected ? palette.recycleSoft : palette.panelAlt,
+              }}
+            >
+              <Text style={{ fontWeight: "800", fontSize: 13, color: selected ? palette.recycleAccent : palette.textSecondary }}>{preset.hint}</Text>
+              <Text style={{ fontSize: 10, color: selected ? palette.recycleAccent : palette.textMuted, marginTop: 1 }}>{preset.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
-            <Button mode="contained" onPress={async () => {
-              const v = Number(String(goalInput).replace(",", "."));
-              if (!v || Number.isNaN(v) || v <= 0) {
-                await setGoal(null);
-                setGoalModalVisible(false);
-                return;
-              }
-              await setGoal(Math.round(v));
-              setGoalModalVisible(false);
-            }} style={{ marginBottom: 10 }}>Salvar</Button>
+      {/* Input personalizado */}
+      <Text style={{ fontSize: 12, fontWeight: "700", color: palette.textSecondary, letterSpacing: 0.8, marginBottom: 10 }}>OU VALOR PERSONALIZADO</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <TextInput
+          label="Gramas por dia"
+          value={goalInput}
+          onChangeText={(v) => { setGoalInput(v); setGoalLabel(""); }}
+          keyboardType="numeric"
+          mode="outlined"
+          style={{ flex: 1, backgroundColor: palette.modalInput }}
+          theme={{
+            colors: {
+              primary: palette.recycleAccent,        // cor da borda e label quando focado
+              onSurfaceVariant: palette.textMuted,   // cor do label quando não focado
+              onSurface: palette.textPrimary,        // cor do texto digitado
+              outline: palette.cardBorder,           // cor da borda quando não focado
+            },
+          }}
+        />
+      </View>
 
-            <Button mode="text" onPress={() => setGoalModalVisible(false)}>Cancelar</Button>
+      {/* Preview */}
+      {goalInput && Number(goalInput) > 0 ? (
+        <View style={{ backgroundColor: palette.recycleSoft, borderWidth: 1, borderColor: palette.recycleLine, borderRadius: 14, padding: 12, marginBottom: 20, flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <MaterialCommunityIcons name="target" size={20} color={palette.recycleAccent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: palette.recycleAccent, fontWeight: "800", fontSize: 13 }}>
+              Meta: {Number(goalInput)}g/dia
+              {goalLabel ? ` · ${goalLabel}` : ""}
+            </Text>
+            <Text style={{ color: palette.recycleAccent, fontSize: 11, marginTop: 1, opacity: 0.8 }}>
+              Equivale a ~{(Number(goalInput) / 5).toFixed(0)} sacolas plásticas finas
+            </Text>
           </View>
         </View>
-      </Modal>
+      ) : null}
+
+      {/* Ações */}
+      <Button
+        mode="contained"
+        buttonColor={palette.recycleAccent}
+        textColor={palette.panel}
+        onPress={async () => {
+          const v = Number(String(goalInput).replace(",", "."));
+          if (!v || Number.isNaN(v) || v <= 0) {
+            await setGoal(null);
+          } else {
+            await setGoal(Math.round(v));
+          }
+          setGoalModalVisible(false);
+        }}
+        style={{ marginBottom: 10, borderRadius: 14 }}
+        contentStyle={{ paddingVertical: 4 }}
+      >
+        Salvar meta
+      </Button>
+
+      {goalGrams ? (
+        <Button
+          mode="text"
+          textColor={palette.textSecondary}
+          onPress={async () => {
+            await setGoal(null);
+            setGoalInput("");
+            setGoalLabel("");
+            setGoalModalVisible(false);
+          }}
+        >
+          Meta padrão
+        </Button>
+      ) : (
+        <Button textColor={palette.textSecondary} mode="text" onPress={() => setGoalModalVisible(false)}>Cancelar</Button>
+      )}
+
+    </View>
+  </View>
+</Modal>
 
         {/* Modal to create a new recycling type */}
         <Modal visible={recyclingTypeModalVisible} transparent={true} animationType="slide">
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
             <View style={{ backgroundColor: palette.modalSurface, borderColor: palette.panelAlt, borderWidth: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, minHeight: 320 }}>
               <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 12, color: palette.textPrimary }}>Criar categoria</Text>
-              <TextInput label="Nome da categoria" value={recyclingNewTypeName} onChangeText={setRecyclingNewTypeName} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput }} />
-              <TextInput label="Descrição (opcional)" value={recyclingNewTypeHint} onChangeText={setRecyclingNewTypeHint} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput }} />
+              <TextInput label="Nome da categoria" value={recyclingNewTypeName} onChangeText={setRecyclingNewTypeName} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput, color: palette.textPrimary }} />
+              <TextInput label="Descrição (opcional)" value={recyclingNewTypeHint} onChangeText={setRecyclingNewTypeHint} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput, color: palette.textPrimary }} />
               <Text style={{ fontSize: 14, fontWeight: "600", marginBottom: 8, color: palette.textPrimary }}>Ícone</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 16 }}>
                 {ICON_OPTIONS.map((icon) => (
@@ -900,6 +1037,7 @@ export default function HomeScreen() {
                 borderColor={palette.recycleLine}
                 backgroundColor={palette.panel}
               />
+              
             </View>
 
             <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>

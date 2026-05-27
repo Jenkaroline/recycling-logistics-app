@@ -225,7 +225,6 @@ const COLLECTION_POINTS: CollectionPoint[] = [
 
 const NEARBY_DISTANCE_KM = 80;
 const POINTS_CACHE_KEY = "@maps/nearbyPointsCache-v1";
-const LOCATION_PREF_KEY = "@settings/locationEnabled";
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -495,7 +494,6 @@ export default function MapsScreen() {
   const drawerOpen = drawerStatus === "open";
   const { darkModeEnabled } = useThemePreference();
   const colors = darkModeEnabled ? COLORS : LIGHT_COLORS;
-  const [locationSharingEnabled, setLocationSharingEnabled] = useState(true);
   const [permissionGranted, setPermissionGranted] = useState<boolean | null>(
     null,
   );
@@ -543,12 +541,11 @@ export default function MapsScreen() {
     setError("");
 
     try {
-      const savedPreference = await AsyncStorage.getItem(LOCATION_PREF_KEY);
-      const isLocationEnabled = savedPreference !== "false";
-      setLocationSharingEnabled(isLocationEnabled);
+      const permission = await Location.getForegroundPermissionsAsync();
 
-      if (!isLocationEnabled) {
+      if (permission.status !== "granted") {
         setPermissionGranted(false);
+
         setUserCoords(null);
         setRegion(DEFAULT_REGION);
         setPointDetails(null);
@@ -582,18 +579,6 @@ export default function MapsScreen() {
           setIsSearching(false);
         }
         if (isLatestRequest()) {
-          setIsSyncing(false);
-        }
-        return;
-      }
-
-      const permission = await Location.requestForegroundPermissionsAsync();
-
-      if (permission.status !== "granted") {
-        if (isLatestRequest()) {
-          setPermissionGranted(false);
-          setError("Permissão de localização negada.");
-          setIsSearching(false);
           setIsSyncing(false);
         }
         return;
@@ -784,19 +769,6 @@ export default function MapsScreen() {
       setRefreshing(false);
     }
   }, [syncNearbyPoints]);
-
-  const permissionText = useMemo(() => {
-    if (!locationSharingEnabled) {
-      return "Localização desativada. Mostrando pontos de reciclagem genéricos.";
-    }
-    if (permissionGranted === null) {
-      return "Solicitando permissão de localização...";
-    }
-    if (!permissionGranted) {
-      return "Permita sua localização para mostrar ecopontos próximos.";
-    }
-    return "Mostrando ecopontos próximos da sua posição atual.";
-  }, [locationSharingEnabled, permissionGranted]);
 
   const handlePointSelect = useCallback(
     (point: CollectionPoint) => {

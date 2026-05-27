@@ -302,7 +302,7 @@ export default function RecordsScreen() {
               <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
             </TouchableOpacity>
 
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {/* <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <TouchableOpacity
                 onPress={() => horizontalRef.current?.scrollTo({ x: 0, animated: true })}
                 style={{
@@ -321,7 +321,7 @@ export default function RecordsScreen() {
                   backgroundColor: recordsPage === 1 ? palette.accent : palette.panelAlt,
                 }}
               />
-            </View>
+            </View> */}
 
             <TouchableOpacity
               onPress={() => (navigation as any).navigate("Notificações")}
@@ -497,7 +497,7 @@ export default function RecordsScreen() {
             </View>
           </ScrollView>
         </View>
-
+{/* 
         <View style={{ width }}>
           <ScrollView
             style={{ flex: 1, backgroundColor: palette.bg }}
@@ -584,7 +584,7 @@ export default function RecordsScreen() {
               )}
             </View>
           </ScrollView>
-        </View>
+        </View> */}
       </ScrollView>
 
       <Modal visible={editingId !== null} transparent animationType="slide" onRequestClose={closeEdit}>

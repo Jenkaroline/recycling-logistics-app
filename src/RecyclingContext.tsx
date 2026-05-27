@@ -24,6 +24,10 @@ type RecyclingAction = {
   authorName?: string;
   xpEarned?: number;
   notes?: string;
+  photoUrl?: string | null;
+  contestCount?: number;
+  contestPenaltyApplied?: boolean;
+  contestPenaltyAppliedAt?: string | null;
   createdAt: string;
 };
 
@@ -37,6 +41,10 @@ type AddActionInput =
       authorName?: string;
       xpEarned?: number;
       notes?: string;
+      photoUrl?: string | null;
+      contestCount?: number;
+      contestPenaltyApplied?: boolean;
+      contestPenaltyAppliedAt?: string | null;
     };
 
 type RecyclingContextValue = {
@@ -65,6 +73,12 @@ function normalizeAction(entry: RecyclingAction & { createdAt?: unknown }): Recy
         : hasToDate
           ? (createdAt as { toDate: () => Date }).toDate().toISOString()
           : new Date().toISOString(),
+      contestCount: Number(entry.contestCount || 0),
+      contestPenaltyApplied: Boolean(entry.contestPenaltyApplied),
+      contestPenaltyAppliedAt:
+        typeof entry.contestPenaltyAppliedAt === "string"
+          ? entry.contestPenaltyAppliedAt
+          : null,
   };
 }
 
@@ -139,6 +153,10 @@ export function RecyclingProvider({ children }: { children: React.ReactNode }) {
       authorName: payload.authorName || null,
       xpEarned: Number(payload.xpEarned || 0),
       notes: payload.notes || null,
+      photoUrl: payload.photoUrl || null,
+      contestCount: Number(payload.contestCount || 0),
+      contestPenaltyApplied: Boolean(payload.contestPenaltyApplied),
+      contestPenaltyAppliedAt: payload.contestPenaltyAppliedAt || null,
       createdAt: serverTimestamp(),
     };
 

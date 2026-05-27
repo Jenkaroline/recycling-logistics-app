@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import {
   deleteUser,
   EmailAuthProvider,
@@ -14,7 +14,9 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  AppState,
   Alert,
+  Linking,
   Image,
   Modal,
   ScrollView,
@@ -48,8 +50,6 @@ type BarSegment = {
   end: Date;
   categories: Array<{ label: string; value: number; icon?: string }>;
 };
-
-const LOCATION_PREF_KEY = "@settings/locationEnabled";
 
 function startOfWeek(date: Date) {
   const copy = new Date(date);
@@ -213,8 +213,8 @@ export default function SettingsScreen() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [locationEnabled, setLocationEnabled] = useState(true);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
   const consumedSectionRef = React.useRef<string | null>(null);
   const barPositiveColor = darkModeEnabled ? "#2cb67d" : "#17603f";
   const barNegativeColor = darkModeEnabled ? "#ef4444" : "#a61d24";
@@ -227,6 +227,98 @@ export default function SettingsScreen() {
   const closeActivePanel = React.useCallback(() => {
     setActivePanel("none");
   }, []);
+
+  const openSystemSettings = React.useCallback(async () => {
+    try {
+      await Linking.openSettings();
+    } catch {
+      Alert.alert("Ajustes indisponíveis", "Não foi possível abrir os ajustes do dispositivo agora.");
+    }
+  }, []);
+
+  const refreshPermissions = React.useCallback(async () => {
+    try {
+      const [cameraPermission, locationPermission] = await Promise.all([
+        ImagePicker.getCameraPermissionsAsync(),
+        Location.getForegroundPermissionsAsync(),
+      ]);
+
+      setCameraPermissionGranted(cameraPermission.granted);
+      setLocationPermissionGranted(locationPermission.granted);
+    } catch {
+      setCameraPermissionGranted(false);
+      setLocationPermissionGranted(false);
+    }
+  }, []);
+
+  const requestCameraPermission = React.useCallback(async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    setCameraPermissionGranted(permission.granted);
+    if (!permission.granted) {
+      Alert.alert(
+        "Permissão de câmera",
+        "A câmera foi negada. Você pode habilitá-la nos ajustes do dispositivo.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Abrir ajustes", onPress: openSystemSettings },
+        ],
+      );
+    }
+  }, [openSystemSettings]);
+
+  const requestLocationPermission = React.useCallback(async () => {
+    const permission = await Location.requestForegroundPermissionsAsync();
+    setLocationPermissionGranted(permission.granted);
+    if (!permission.granted) {
+      Alert.alert(
+        "Permissão de localização",
+        "A localização foi negada. Você pode habilitá-la nos ajustes do dispositivo.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Abrir ajustes", onPress: openSystemSettings },
+        ],
+      );
+    }
+  }, [openSystemSettings]);
+
+  const handlePermissionToggle = React.useCallback(
+    async (permissionType: "camera" | "location", enabled: boolean) => {
+      if (!enabled) {
+        Alert.alert(
+          "Gerenciar no sistema",
+          "Essa permissão é controlada pelos ajustes do dispositivo. Abra os ajustes para desativá-la ou revogá-la.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Abrir ajustes", onPress: openSystemSettings },
+          ],
+        );
+        return;
+      }
+
+      if (permissionType === "camera") {
+        await requestCameraPermission();
+        return;
+      }
+
+      if (permissionType === "location") {
+        await requestLocationPermission();
+        return;
+      }
+    },
+    [openSystemSettings, requestCameraPermission, requestLocationPermission],
+  );
+
+  useEffect(() => {
+    void refreshPermissions();
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshPermissions();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [refreshPermissions]);
 
   React.useEffect(() => {
     const section = route.params?.section;
@@ -242,30 +334,6 @@ export default function SettingsScreen() {
       consumedSectionRef.current = null;
     }
   }, [route.params?.section]);
-
-  React.useEffect(() => {
-    let mounted = true;
-
-    const loadLocationPreference = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(LOCATION_PREF_KEY);
-        if (!mounted || saved === null) return;
-        setLocationEnabled(saved === "true");
-      } catch {
-        // ignore preference read errors and keep default value
-      }
-    };
-
-    void loadLocationPreference();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    void AsyncStorage.setItem(LOCATION_PREF_KEY, String(locationEnabled));
-  }, [locationEnabled]);
 
   useEffect(() => {
     setSelectedBarKey(null);
@@ -874,7 +942,7 @@ export default function SettingsScreen() {
             marginBottom: 10,
           }}
         >
-          Preferências
+          Permissões do dispositivo
         </Text>
 
         <TouchableOpacity
@@ -900,25 +968,45 @@ export default function SettingsScreen() {
             borderRadius: 12,
             padding: 12,
             marginBottom: 10,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-              Notificações
-            </Text>
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {notificationsEnabled ? "Ativadas" : "Desativadas"}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: darkModeEnabled ? "rgba(77, 144, 254, 0.14)" : "rgba(77, 144, 254, 0.12)",
+                marginRight: 10,
+              }}
+            >
+              <Ionicons name="camera-outline" size={18} color="#4d90fe" />
+            </View>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Câmera
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                {cameraPermissionGranted === null
+                  ? "Verificando..."
+                  : cameraPermissionGranted
+                    ? "Concedida no sistema"
+                    : "Negada no sistema"}
+              </Text>
+            </View>
+            <Switch
+              value={cameraPermissionGranted === true}
+              onValueChange={(value) => void handlePermissionToggle("camera", value)}
+              disabled={cameraPermissionGranted === null}
+              thumbColor={palette.switchThumb}
+              trackColor={{ true: palette.switchOn, false: palette.switchOff }}
+            />
           </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            thumbColor={palette.switchThumb}
-            trackColor={{ true: palette.switchOn, false: palette.switchOff }}
-          />
+          <Text style={{ color: palette.textMuted, fontSize: 12, lineHeight: 17 }}>
+            Necessária para tirar fotos diretamente no app.
+          </Text>
         </View>
 
         <View
@@ -927,25 +1015,45 @@ export default function SettingsScreen() {
             borderRadius: 12,
             padding: 12,
             marginBottom: 10,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-              Localização
-            </Text>
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {locationEnabled ? "Ativada" : "Desativada"}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: darkModeEnabled ? "rgba(19, 192, 160, 0.14)" : "rgba(19, 192, 160, 0.12)",
+                marginRight: 10,
+              }}
+            >
+              <Ionicons name="location-outline" size={18} color="#13c0a0" />
+            </View>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Localização
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                {locationPermissionGranted === null
+                  ? "Verificando..."
+                  : locationPermissionGranted
+                    ? "Concedida no sistema"
+                    : "Negada no sistema"}
+              </Text>
+            </View>
+            <Switch
+              value={locationPermissionGranted === true}
+              onValueChange={(value) => void handlePermissionToggle("location", value)}
+              disabled={locationPermissionGranted === null}
+              thumbColor={palette.switchThumb}
+              trackColor={{ true: palette.switchOn, false: palette.switchOff }}
+            />
           </View>
-          <Switch
-            value={locationEnabled}
-            onValueChange={setLocationEnabled}
-            thumbColor={palette.switchThumb}
-            trackColor={{ true: palette.switchOn, false: palette.switchOff }}
-          />
+          <Text style={{ color: palette.textMuted, fontSize: 12, lineHeight: 17 }}>
+            Usada para mostrar ecopontos próximos e rotas mais precisas.
+          </Text>
         </View>
 
         <View

@@ -96,6 +96,7 @@ type RecyclingCompetitionContextValue = {
   declineGroupInvitation: (invitationId: string) => Promise<void>;
   removeMemberFromActiveGroup: (memberId: string) => Promise<void>;
   awardXpToActiveGroup: (xp: number) => Promise<void>;
+  adjustGroupXp: (groupId: string, xpDelta: number) => Promise<void>;
   addChatMessage: (text: string) => Promise<void>;
 };
 
@@ -955,6 +956,38 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     });
   };
 
+  const adjustGroupXp = async (groupId: string, xpDelta: number) => {
+    if (!groupId || xpDelta === 0) return;
+
+    const currentUserId = currentUidRef.current || "local-user";
+    const group = groups.find((item) => item.id === groupId);
+    if (!group) return;
+
+    const nextXp = Math.max(0, group.totalXp + xpDelta);
+    const nextMembers = group.members.map((member) => {
+      if (member.id !== currentUserId) return member;
+      return {
+        ...member,
+        name: member.name || getCurrentUserName(),
+        totalXp: Math.max(0, member.totalXp + xpDelta),
+      };
+    });
+
+    const nextGroup = {
+      ...group,
+      members: nextMembers,
+      totalXp: nextXp,
+    };
+
+    await writeGroup(groupId, nextGroup);
+    void recordAuditEvent({
+      eventType: "update",
+      resourceType: "recycling_group",
+      resourceId: groupId,
+      payload: { xpDelta },
+    });
+  };
+
   const addChatMessage = async (text: string) => {
     const groupId = activeGroupIdRef.current;
     const trimmed = text.trim();
@@ -1061,6 +1094,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         declineGroupInvitation,
         removeMemberFromActiveGroup,
         awardXpToActiveGroup,
+        adjustGroupXp,
         addChatMessage,
       }}
     >

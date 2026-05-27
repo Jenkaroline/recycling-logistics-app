@@ -6,13 +6,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { addDoc, collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc } from "firebase/firestore";
 import { auth } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
+import { captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { db } from "../service/firebaseConfig";
 
 type GroupTab = "stats" | "feed" | "chat";
@@ -27,6 +28,16 @@ type GroupEvidenceEntry = {
   authorName?: string | null;
   xpEarned?: number;
   notes?: string | null;
+  photoUrl?: string | null;
+  contestCount?: number;
+  contestPenaltyApplied?: boolean;
+  contestPenaltyAppliedAt?: string | null;
+  contestReasons?: Array<{
+    authorId: string;
+    authorName?: string | null;
+    reason: string;
+    createdAt: string;
+  }>;
   createdAt: string;
 };
 
@@ -117,6 +128,7 @@ export default function MyGroupsScreen() {
     sendGroupInvitation,
     activeGroupId,
     awardXpToActiveGroup,
+    adjustGroupXp,
   } = useRecyclingCompetition();
 
   const [createVisible, setCreateVisible] = useState(false);
@@ -130,6 +142,9 @@ export default function MyGroupsScreen() {
   const [manageMemberName, setManageMemberName] = useState("");
   const [groupEvidenceEntries, setGroupEvidenceEntries] = useState<GroupEvidenceEntry[]>([]);
   const [recordModalVisible, setRecordModalVisible] = useState(false);
+  const [contestModalVisible, setContestModalVisible] = useState(false);
+  const [contestReason, setContestReason] = useState("");
+  const [contestTargetEntry, setContestTargetEntry] = useState<GroupEvidenceEntry | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
 
   const palette: GroupPalette = darkModeEnabled
@@ -217,11 +232,13 @@ export default function MyGroupsScreen() {
       evidenceQuery,
       (snapshot) => {
         setGroupEvidenceEntries(
-          snapshot.docs.map((snap) => ({
-            id: snap.id,
-            ...(snap.data() as Omit<GroupEvidenceEntry, "id">),
-            createdAt: normalizeDateString((snap.data() as { createdAt?: unknown }).createdAt),
-          })),
+          snapshot.docs
+            .map((snap) => ({
+              id: snap.id,
+              ...(snap.data() as Omit<GroupEvidenceEntry, "id">),
+              createdAt: normalizeDateString((snap.data() as { createdAt?: unknown }).createdAt),
+            }))
+            .filter((entry) => !Boolean((entry as GroupEvidenceEntry).contestPenaltyApplied)),
         );
       },
       (error) => {
@@ -470,16 +487,127 @@ export default function MyGroupsScreen() {
 
   const handleAddGroupRecord = async (item: { id: string; type: string; xp: number }) => {
     if (!selectedGroup) return;
+
+    const photoUrl = await captureRecyclingEvidencePhoto();
+    if (!photoUrl) return;
+
     const currentUser = auth.currentUser;
     await addRecyclingAction({
       type: item.type,
       typeId: item.id,
       groupId: selectedGroup.id,
+      photoUrl,
       authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
       xpEarned: item.xp,
     });
     await awardXpToActiveGroup(item.xp);
     navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
+  };
+
+  const openContestModal = (entry: GroupEvidenceEntry) => {
+    if (entry.authorId === auth.currentUser?.uid) {
+      Alert.alert("Sem ação", "Você não pode contestar a sua própria evidência.");
+      return;
+    }
+
+    setContestTargetEntry(entry);
+    setContestReason("");
+    setContestModalVisible(true);
+  };
+
+  const submitContest = async () => {
+    if (!selectedGroup || !contestTargetEntry) return;
+    const reason = contestReason.trim();
+    if (!reason) {
+      Alert.alert("Motivo obrigatório", "Explique por que esta evidência é inválida.");
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    try {
+      let shouldApplyPenalty = false;
+      await runTransaction(db, async (transaction) => {
+        const entryRef = doc(db, "groupRecyclingActions", selectedGroup.id, "entries", contestTargetEntry.id);
+        const entrySnapshot = await transaction.get(entryRef);
+        if (!entrySnapshot.exists()) {
+          throw new Error("Evidência não encontrada.");
+        }
+
+        const currentCount = Number(entrySnapshot.data().contestCount || 0);
+        const currentPenaltyApplied = Boolean(entrySnapshot.data().contestPenaltyApplied);
+        const nextCount = currentCount + 1;
+        const previousReasons = Array.isArray(entrySnapshot.data().contestReasons)
+          ? entrySnapshot.data().contestReasons
+          : [];
+        const nextReasons = [
+          ...previousReasons,
+          {
+            authorId: currentUser.uid,
+            authorName: currentUser.displayName?.trim() || currentUser.email?.split("@")[0] || "Você",
+            reason,
+            createdAt: new Date().toISOString(),
+          },
+        ].slice(-10);
+
+        transaction.update(entryRef, {
+          contestCount: nextCount,
+          contestPenaltyApplied: currentPenaltyApplied || nextCount > 5,
+          contestPenaltyAppliedAt: !currentPenaltyApplied && nextCount > 5 ? serverTimestamp() : entrySnapshot.data().contestPenaltyAppliedAt || null,
+          contestReasons: nextReasons,
+        });
+
+        shouldApplyPenalty = !currentPenaltyApplied && nextCount > 5;
+      });
+
+      // create a group-level notification about the contest (all members will receive it, except the actor)
+      try {
+        await addDoc(collection(db, "groupNotifications", selectedGroup.id, "items"), {
+          type: "contested",
+          entryId: contestTargetEntry.id,
+          entryAuthorId: contestTargetEntry.authorId || null,
+          entryAuthorName: contestTargetEntry.authorName || null,
+          actorId: currentUser.uid,
+          actorName: currentUser.displayName?.trim() || currentUser.email?.split("@")[0] || "Alguém",
+          reason,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn("failed to create contest notification:", err);
+      }
+
+      if (shouldApplyPenalty) {
+        const penaltyXp = Number(contestTargetEntry.xpEarned || 0);
+        if (penaltyXp > 0) {
+          await adjustGroupXp(selectedGroup.id, -penaltyXp);
+        }
+      }
+        // notify members that the evidence was invalidated
+        try {
+          await addDoc(collection(db, "groupNotifications", selectedGroup.id, "items"), {
+            type: "invalidated",
+            entryId: contestTargetEntry.id,
+            entryAuthorId: contestTargetEntry.authorId || null,
+            entryAuthorName: contestTargetEntry.authorName || null,
+            actorId: currentUser.uid,
+            actorName: currentUser.displayName?.trim() || currentUser.email?.split("@")[0] || "Alguém",
+            createdAt: serverTimestamp(),
+          });
+        } catch (err) {
+          console.warn("failed to create invalidation notification:", err);
+        }
+
+      setContestModalVisible(false);
+      setContestReason("");
+      setContestTargetEntry(null);
+    } catch (error) {
+      if ((error as { code?: string })?.code === "permission-denied") {
+        Alert.alert("Sem permissão", "Não foi possível salvar a contestação agora.");
+        return;
+      }
+      Alert.alert("Erro", "Não foi possível registrar a contestação.");
+    }
   };
 
   const sendMessage = async () => {
@@ -646,22 +774,101 @@ export default function MyGroupsScreen() {
                 <Text style={{ color: palette.textSecondary, fontSize: 13 }}>Ainda não há evidências registradas para este grupo.</Text>
               </View>
             ) : (
-              groupFeed.map((entry) => (
-                <View key={entry.id} style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 16 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{entry.type}</Text>
-                    <Text style={{ color: palette.recycleAccent, fontWeight: "800" }}>{entry.xpEarned || 0} XP</Text>
+              groupFeed.map((entry) => {
+                const createdAt = new Date(normalizeDateString(entry.createdAt));
+                const timeLabel = createdAt.toLocaleString("pt-BR", {
+                  day: "2-digit",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const contestCount = Number(entry.contestCount || 0);
+                const invalidated = contestCount > 5 || Boolean(entry.contestPenaltyApplied);
+                const contestReasons = Array.isArray(entry.contestReasons) ? entry.contestReasons : [];
+
+                return (
+                  <View key={entry.id} style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: invalidated ? palette.dangerBorder : palette.cardBorder, borderRadius: 24, overflow: "hidden" }}>
+                    <View style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <View style={{ flex: 1, paddingRight: 12 }}>
+                          <Text style={{ color: palette.textPrimary, fontWeight: "900", fontSize: 15 }} numberOfLines={1}>
+                            {entry.type}
+                          </Text>
+                          <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
+                            {entry.authorName || "Membro"} • {timeLabel}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: invalidated ? palette.dangerPanel : palette.recycleSoft, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+                          <Text style={{ color: invalidated ? palette.dangerText : palette.recycleAccent, fontWeight: "900", fontSize: 11 }}>{entry.xpEarned || 0} XP</Text>
+                        </View>
+                      </View>
+
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        {contestCount > 0 ? (
+                          <View style={{ backgroundColor: palette.panelAlt, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+                            <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800" }}>{contestCount} contestações</Text>
+                          </View>
+                        ) : null}
+                        {invalidated ? (
+                          <View style={{ backgroundColor: palette.dangerPanel, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+                            <Text style={{ color: palette.dangerText, fontSize: 11, fontWeight: "800" }}>Invalidada</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {entry.photoUrl ? (
+                      <View style={{ paddingHorizontal: 14, paddingBottom: 12 }}>
+                        <Image source={{ uri: entry.photoUrl }} style={{ width: "100%", height: 190, borderRadius: 18, backgroundColor: palette.panelAlt }} contentFit="cover" transition={180} />
+                      </View>
+                    ) : null}
+
+                    <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+                      <View style={{ backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 12 }}>
+                        {entry.notes ? (
+                          <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 19 }}>{entry.notes}</Text>
+                        ) : (
+                          <Text style={{ color: palette.textMuted, fontSize: 13, lineHeight: 19 }}>Sem observações.</Text>
+                        )}
+                      </View>
+
+                      {contestReasons.length > 0 ? (
+                        <View style={{ gap: 8, marginBottom: 12 }}>
+                          {contestReasons.slice(-2).map((contest) => (
+                            <View key={`${contest.authorId}-${contest.createdAt}`} style={{ backgroundColor: palette.panelAlt, borderRadius: 14, padding: 10, borderWidth: 1, borderColor: palette.cardBorder }}>
+                              <Text style={{ color: palette.textSecondary, fontSize: 10, fontWeight: "800", marginBottom: 4 }}>
+                                {contest.authorName || "Usuário"}
+                              </Text>
+                              <Text style={{ color: palette.textPrimary, fontSize: 12, lineHeight: 17 }}>
+                                {contest.reason}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+
+                      <TouchableOpacity
+                        onPress={() => openContestModal(entry)}
+                        disabled={entry.authorId === auth.currentUser?.uid}
+                        style={{
+                          alignSelf: "flex-start",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                          backgroundColor: entry.authorId === auth.currentUser?.uid ? palette.panelAlt : palette.dangerPanel,
+                          borderRadius: 999,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          opacity: entry.authorId === auth.currentUser?.uid ? 0.55 : 1,
+                        }}
+                      >
+                        <Ionicons name="alert-circle-outline" size={16} color={palette.dangerText} />
+                        <Text style={{ color: palette.dangerText, fontSize: 12, fontWeight: "800" }}>Contestar evidência</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 8 }}>
-                    {entry.authorName || "Membro"} • {new Date(normalizeDateString(entry.createdAt)).toLocaleString("pt-BR")}
-                  </Text>
-                  {entry.notes ? (
-                    <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 18 }}>{entry.notes}</Text>
-                  ) : (
-                    <Text style={{ color: palette.textMuted, fontSize: 13 }}>Sem observações.</Text>
-                  )}
-                </View>
-              ))
+                );
+              })
             )}
           </View>
         ) : null}
@@ -932,6 +1139,41 @@ export default function MyGroupsScreen() {
               Criar grupo
             </Button>
             <Button mode="text" onPress={() => setCreateVisible(false)}>Cancelar</Button>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={contestModalVisible} transparent animationType="fade" onRequestClose={() => setContestModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", paddingHorizontal: 18 }}>
+          <View style={{ backgroundColor: palette.modalSurface, borderRadius: 24, borderWidth: 1, borderColor: palette.cardBorder, padding: 16, maxWidth: 520, width: "100%", alignSelf: "center" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>CONTESTAÇÃO</Text>
+                <Text style={{ color: palette.textPrimary, fontSize: 20, fontWeight: "900", marginTop: 2 }}>Por que esta evidência é inválida?</Text>
+              </View>
+              <TouchableOpacity onPress={() => setContestModalVisible(false)} style={{ width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="close" size={18} color={palette.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              label="Motivo"
+              placeholder="Explique o que torna a evidência inválida"
+              value={contestReason}
+              onChangeText={setContestReason}
+              multiline
+              mode="outlined"
+              textColor={palette.textPrimary}
+              placeholderTextColor={palette.textSecondary}
+              outlineColor={palette.cardBorder}
+              activeOutlineColor={palette.danger}
+              theme={inputTheme}
+              style={{ backgroundColor: palette.modalInput, marginBottom: 14 }}
+            />
+
+            <Button mode="contained" buttonColor={palette.danger} textColor="#fff" onPress={() => void submitContest()}>
+              Enviar contestação
+            </Button>
           </View>
         </View>
       </Modal>

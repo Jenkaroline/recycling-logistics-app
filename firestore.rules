@@ -103,11 +103,36 @@ service cloud.firestore {
       }
     }
 
+    // Group notifications (contests / invalidations)
+    match /groupNotifications/{groupId} {
+      match /items/{itemId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.actorId == request.auth.uid;
+        allow update: if signedIn() && request.auth.uid == resource.data.actorId;
+        allow delete: if signedIn() && request.auth.uid == resource.data.actorId;
+      }
+    }
+
     match /groupRecyclingActions/{groupId} {
       match /entries/{docId} {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.authorId == request.auth.uid && request.resource.data.groupId == groupId;
-        allow update, delete: if signedIn() && request.auth.uid == resource.data.authorId;
+        allow update: if signedIn() && (
+          request.auth.uid == resource.data.authorId ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "contestCount",
+            "contestPenaltyApplied",
+            "contestPenaltyAppliedAt",
+            "contestReasons"
+          ])
+        );
+        allow delete: if signedIn() && request.auth.uid == resource.data.authorId;
+
+        match /contests/{contestId} {
+          allow read: if signedIn();
+          allow create: if signedIn() && request.resource.data.groupId == groupId && request.resource.data.entryId == docId;
+          allow update, delete: if signedIn() && request.auth.uid == resource.data.authorId;
+        }
       }
     }
 
