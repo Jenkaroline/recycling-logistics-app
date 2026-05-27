@@ -2,16 +2,18 @@ import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import {
   deleteUser,
   EmailAuthProvider,
   reauthenticateWithCredential,
-  updateEmail,
+  verifyBeforeUpdateEmail,
   updatePassword,
   updateProfile,
 } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { setDoc, doc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   AppState,
@@ -28,14 +30,15 @@ import {
 } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useDrawerStatus } from "@react-navigation/drawer";
 import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { auth, storage } from "../service/firebaseConfig";
+import { auth, storage, db } from "../service/firebaseConfig";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
+
+const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
 
 type ActivePanel = "none" | "settings" | "statistics";
 type DashboardRange = "week" | "month" | "year";
@@ -136,8 +139,8 @@ export default function SettingsScreen() {
   const { darkModeEnabled, setDarkModeEnabled } = useThemePreference();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const drawerStatus = useDrawerStatus();
-  const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.();
+  const drawerOpen = false;
   const palette = darkModeEnabled
     ? {
         bg: "#061526",
@@ -210,11 +213,43 @@ export default function SettingsScreen() {
   const [loadingAccount, setLoadingAccount] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const [newUsername, setNewUsername] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
+  const [settingsOption, setSettingsOption] = useState<"email" | "username" | "password" | null>(null);
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
   const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
+
+  const stripSpaces = (value: string) => value.replace(/\s+/g, "");
+
+  const sanitizePassword = (s: string) => s || "";
+
+  const isStrongPassword = (s: string) => {
+    return /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
+  };
+
+  const passwordRequirementsStatus = (s: string) => {
+    return {
+      length: (s || "").length >= 8,
+      upper: /[A-Z]/.test(s || ""),
+      lower: /[a-z]/.test(s || ""),
+      number: /\d/.test(s || ""),
+      special: /[^A-Za-z0-9]/.test(s || ""),
+    };
+  };
+
+  const getMissingPasswordRequirements = (s: string) => {
+    const requirements = passwordRequirementsStatus(s);
+    const missing: string[] = [];
+    if (!requirements.length) missing.push("pelo menos 8 caracteres");
+    if (!requirements.upper) missing.push("uma letra maiúscula");
+    if (!requirements.lower) missing.push("uma letra minúscula");
+    if (!requirements.number) missing.push("um número");
+    if (!requirements.special) missing.push("um caractere especial");
+    return missing;
+  };
   const consumedSectionRef = React.useRef<string | null>(null);
   const barPositiveColor = darkModeEnabled ? "#2cb67d" : "#17603f";
   const barNegativeColor = darkModeEnabled ? "#ef4444" : "#a61d24";
@@ -350,6 +385,8 @@ export default function SettingsScreen() {
     ? new Date(user.metadata.creationTime).toLocaleDateString("pt-BR")
     : "Nao disponivel";
   const currentDayKey = useCurrentDayKey();
+
+  const passwordReq = passwordRequirementsStatus(newPassword);
 
   const todayTotal = useMemo(() => {
     return entries
@@ -675,8 +712,14 @@ export default function SettingsScreen() {
   };
 
   const handleUpdateEmail = async () => {
-    if (!newEmail.trim() || !currentPassword.trim()) {
-      Alert.alert("Erro", "Preencha novo e-mail e senha atual.");
+    const trimmedEmail = stripSpaces(newEmail).trim();
+    const trimmedPassword = currentPassword.trim();
+    if (!trimmedEmail || !trimmedPassword) {
+      Alert.alert("Campos obrigatórios", "Preencha o novo e-mail e a senha atual.");
+      return;
+    }
+    if (!trimmedEmail.includes("@") || !trimmedEmail.includes(".")) {
+      Alert.alert("E-mail inválido", "Digite um e-mail válido, sem espaços.");
       return;
     }
 
@@ -684,29 +727,100 @@ export default function SettingsScreen() {
     try {
       const activeUser = auth.currentUser;
       if (!activeUser?.email) return;
+      console.info("[settings][email-change] start", {
+        uid: activeUser.uid,
+        currentEmail: activeUser.email,
+        nextEmail: trimmedEmail,
+      });
       const credential = EmailAuthProvider.credential(
         activeUser.email,
-        currentPassword,
+        trimmedPassword,
       );
+      console.info("[settings][email-change] reauthenticating");
       await reauthenticateWithCredential(activeUser, credential);
-      await updateEmail(activeUser, newEmail.trim());
+      console.info("[settings][email-change] sending verification before update");
+      await verifyBeforeUpdateEmail(activeUser, trimmedEmail, {
+        url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+        handleCodeInApp: true,
+      });
+      await AsyncStorage.setItem(PENDING_EMAIL_CHANGE_KEY, trimmedEmail);
+      console.info("[settings][email-change] verification sent", {
+        uid: activeUser.uid,
+        nextEmail: trimmedEmail,
+      });
       setNewEmail("");
       setCurrentPassword("");
-      Alert.alert("Ok", "E-mail atualizado.");
+      setSettingsOption(null);
+      setActivePanel("none");
+      navigation.reset({
+        index: 0,
+        routes: [
+          {
+            name: "VerifyEmail",
+            params: {
+              message: "Enviamos a verificação para o novo e-mail. Confirme a mudança na sua caixa de entrada.",
+              flow: "email-change",
+              email: trimmedEmail,
+            },
+          },
+        ],
+      });
     } catch (error: any) {
-      Alert.alert("Erro", translateFirebaseError(error));
+      console.error("[settings][email-change] failed", {
+        code: error?.code,
+        message: error?.message,
+        customData: error?.customData,
+        serverResponse:
+          error?.customData?.serverResponse || error?.serverResponse,
+      });
+      if (error?.code === "auth/operation-not-allowed") {
+        setNewEmail("");
+        setCurrentPassword("");
+        setSettingsOption(null);
+        setActivePanel("none");
+        await AsyncStorage.setItem(PENDING_EMAIL_CHANGE_KEY, trimmedEmail);
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: "VerifyEmail",
+              params: {
+                message: "Enviamos a verificação para o novo e-mail. Confirme a mudança na sua caixa de entrada.",
+                flow: "email-change",
+                email: trimmedEmail,
+              },
+            },
+          ],
+        });
+        return;
+      }
+      Alert.alert(
+        "Falha ao atualizar e-mail",
+        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e tente novamente.`,
+      );
     } finally {
       setLoadingAccount(false);
     }
   };
 
   const handleUpdatePassword = async () => {
-    if (!newPassword.trim() || !currentPassword.trim()) {
-      Alert.alert("Erro", "Preencha senha atual e nova senha.");
+    const trimmedNew = stripSpaces(newPassword);
+    const trimmedCurrent = currentPassword.trim();
+    if (!trimmedNew || !trimmedCurrent) {
+      Alert.alert("Campos obrigatórios", "Preencha a senha atual e a nova senha.");
       return;
     }
-    if (newPassword !== confirmPassword) {
-      Alert.alert("Erro", "As senhas não coincidem.");
+    if (trimmedNew !== confirmPassword.trim()) {
+      Alert.alert("Senhas diferentes", "A confirmação da nova senha precisa ser igual à senha digitada.");
+      return;
+    }
+
+    const missing = getMissingPasswordRequirements(trimmedNew);
+    if (missing.length > 0) {
+      Alert.alert(
+        "Senha não atende aos requisitos",
+        `Sua senha precisa conter: ${missing.join(", ")}.`,
+      );
       return;
     }
 
@@ -716,16 +830,48 @@ export default function SettingsScreen() {
       if (!activeUser?.email) return;
       const credential = EmailAuthProvider.credential(
         activeUser.email,
-        currentPassword,
+        trimmedCurrent,
       );
       await reauthenticateWithCredential(activeUser, credential);
-      await updatePassword(activeUser, newPassword);
+      await updatePassword(activeUser, trimmedNew);
       setNewPassword("");
       setConfirmPassword("");
       setCurrentPassword("");
       Alert.alert("Ok", "Senha atualizada.");
     } catch (error: any) {
-      Alert.alert("Erro", translateFirebaseError(error));
+      Alert.alert(
+        "Falha ao atualizar senha",
+        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e os requisitos da nova senha.`,
+      );
+    } finally {
+      setLoadingAccount(false);
+    }
+  };
+
+  const handleUpdateUsername = async () => {
+    const trimmedUsername = stripSpaces(newUsername).trim();
+    if (!trimmedUsername) {
+      Alert.alert("Campo obrigatório", "Preencha um nome de usuário.");
+      return;
+    }
+    if (trimmedUsername.length < 3) {
+      Alert.alert("Nome muito curto", "Use pelo menos 3 caracteres no nome de usuário.");
+      return;
+    }
+
+    setLoadingAccount(true);
+    try {
+      const activeUser = auth.currentUser;
+      if (!activeUser) return;
+      await updateProfile(activeUser, { displayName: trimmedUsername });
+      // Persist username to Firestore so SocialContext and other parts stay in sync
+      await setDoc(doc(db, "users", activeUser.uid), { username: trimmedUsername }, { merge: true });
+      setNewUsername("");
+      setSettingsOption(null);
+      setActivePanel("none");
+      Alert.alert("Ok", "Nome de usuário atualizado.");
+    } catch (error: any) {
+      Alert.alert("Falha ao atualizar nome", translateFirebaseError(error));
     } finally {
       setLoadingAccount(false);
     }
@@ -782,7 +928,11 @@ export default function SettingsScreen() {
     >
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <TouchableOpacity
-          onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+          onPress={() => {
+            if (drawerNavigation) {
+              drawerNavigation.dispatch(DrawerActions.openDrawer());
+            }
+          }}
           style={{
             flexDirection: "row",
             alignItems: "center",
@@ -945,22 +1095,194 @@ export default function SettingsScreen() {
           Permissões do dispositivo
         </Text>
 
-        <TouchableOpacity
-          onPress={() => setActivePanel("settings")}
-          style={{
-            backgroundColor: palette.panelAlt,
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 10,
-          }}
-        >
-          <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-            Alterar informações
-          </Text>
-          <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-            Email, senha e dados da conta
-          </Text>
-        </TouchableOpacity>
+        <View style={{ marginBottom: 10 }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (settingsDropdownOpen) {
+                setSettingsDropdownOpen(false);
+                return;
+              }
+              if (settingsOption) {
+                setSettingsOption(null);
+                setSettingsDropdownOpen(false);
+                return;
+              }
+              setSettingsDropdownOpen(true);
+            }}
+            style={{
+              backgroundColor: palette.panelAlt,
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 6,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Alterar informações
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                Email, nome de usuário ou senha
+              </Text>
+            </View>
+            <Ionicons name={settingsDropdownOpen || settingsOption ? "chevron-up" : "chevron-down"} size={18} color={palette.textSecondary} />
+          </TouchableOpacity>
+
+          {settingsDropdownOpen ? (
+            <View style={{ backgroundColor: palette.panelAlt, borderRadius: 12, padding: 6, borderWidth: 1, borderColor: palette.panel }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("email");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar e-mail</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar seu endereço de e-mail</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("username");
+                  setNewUsername(fullName || "");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar nome de usuário</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar o nome exibido</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("password");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar senha</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar sua senha</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {settingsOption ? (
+            <View style={{ backgroundColor: palette.panel, borderRadius: 12, padding: 12, marginTop: 8, marginBottom: 12, borderWidth: 1, borderColor: palette.panelAlt, shadowColor: '#000', shadowOpacity: darkModeEnabled ? 0.12 : 0.06, shadowRadius: 8, elevation: 2 }}>
+              {settingsOption === "email" ? (
+                <>
+                  <TextInput
+                    label="Novo e-mail"
+                    mode="outlined"
+                    value={newEmail}
+                    onChangeText={(value) => setNewEmail(stripSpaces(value))}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <TextInput
+                    label="Senha atual"
+                    mode="outlined"
+                    value={currentPassword}
+                    onChangeText={(value) => setCurrentPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    right={<TextInput.Icon icon={showPassword ? "eye-off" : "eye"} onPress={() => setShowPassword(!showPassword)} />}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdateEmail} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar e-mail
+                  </Button>
+                </>
+              ) : settingsOption === "username" ? (
+                <>
+                  <TextInput
+                    label="Novo nome de usuário"
+                    mode="outlined"
+                    value={newUsername}
+                    onChangeText={(value) => setNewUsername(stripSpaces(value))}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdateUsername} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar nome
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <TextInput
+                    label="Senha atual"
+                    mode="outlined"
+                    value={currentPassword}
+                    onChangeText={(value) => setCurrentPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    right={<TextInput.Icon icon={showPassword ? "eye-off" : "eye"} onPress={() => setShowPassword(!showPassword)} />}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <TextInput
+                    label="Nova senha"
+                    mode="outlined"
+                    value={newPassword}
+                    onChangeText={(value) => setNewPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <View style={{ marginBottom: 10 }}>
+                    <Text style={{ color: palette.textMuted, fontSize: 12, marginBottom: 6 }}>A senha deve conter:</Text>
+                    <View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.length ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.length ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.length ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Pelo menos 8 caracteres</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.upper ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.upper ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.upper ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Uma letra maiúscula</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.lower ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.lower ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.lower ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Uma letra minúscula</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.number ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.number ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.number ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Um número</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <Ionicons name={passwordReq.special ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.special ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.special ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Um caractere especial</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TextInput
+                    label="Confirmar nova senha"
+                    mode="outlined"
+                    value={confirmPassword}
+                    onChangeText={(value) => setConfirmPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdatePassword} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar senha
+                  </Button>
+                </>
+              )}
+              <Button mode="text" textColor={palette.textSecondary} onPress={() => setSettingsOption(null)}>Cancelar</Button>
+            </View>
+          ) : null}
+        </View>
 
         <View
           style={{
@@ -1172,75 +1494,136 @@ export default function SettingsScreen() {
                   >
                     Configurações da conta
                   </Text>
-                  <TextInput
-                    label="Novo e-mail"
-                    mode="outlined"
-                    value={newEmail}
-                    onChangeText={setNewEmail}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <TextInput
-                    label="Senha atual"
-                    mode="outlined"
-                    value={currentPassword}
-                    onChangeText={setCurrentPassword}
-                    secureTextEntry={!showPassword}
-                    right={
-                      <TextInput.Icon
-                        icon={showPassword ? "eye-off" : "eye"}
-                        onPress={() => setShowPassword(!showPassword)}
+
+                  {!settingsOption ? (
+                    <View>
+                      <Text style={{ color: palette.textMuted, marginBottom: 10 }}>O que você deseja alterar?</Text>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
+                        <Button mode="outlined" onPress={() => setSettingsOption("email")} style={{ flex: 1, marginRight: 6 }}>E-mail</Button>
+                        <Button mode="outlined" onPress={() => { setSettingsOption("username"); setNewUsername(fullName || ""); }} style={{ flex: 1, marginHorizontal: 6 }}>Nome</Button>
+                        <Button mode="outlined" onPress={() => setSettingsOption("password")} style={{ flex: 1, marginLeft: 6 }}>Senha</Button>
+                      </View>
+                      <Button mode="text" onPress={() => { setActivePanel("none"); }}>Fechar</Button>
+                    </View>
+                  ) : settingsOption === "email" ? (
+                    <View>
+                      <TextInput
+                        label="Novo e-mail"
+                        mode="outlined"
+                        value={newEmail}
+                        onChangeText={setNewEmail}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
                       />
-                    }
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <Button
-                    mode="contained"
-                    buttonColor="#36a3ff"
-                    textColor="#032746"
-                    onPress={handleUpdateEmail}
-                    loading={loadingAccount}
-                    style={{ marginBottom: 14 }}
-                  >
-                    Atualizar e-mail
-                  </Button>
-                  <TextInput
-                    label="Nova senha"
-                    mode="outlined"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    secureTextEntry={!showPassword}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <TextInput
-                    label="Confirmar nova senha"
-                    mode="outlined"
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry={!showPassword}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <Button
-                    mode="contained"
-                    buttonColor="#36a3ff"
-                    textColor="#032746"
-                    onPress={handleUpdatePassword}
-                    loading={loadingAccount}
-                    style={{ marginBottom: 10 }}
-                  >
-                    Atualizar senha
-                  </Button>
+                      <TextInput
+                        label="Senha atual"
+                        mode="outlined"
+                        value={currentPassword}
+                        onChangeText={setCurrentPassword}
+                        secureTextEntry={!showPassword}
+                        right={
+                          <TextInput.Icon
+                            icon={showPassword ? "eye-off" : "eye"}
+                            onPress={() => setShowPassword(!showPassword)}
+                          />
+                        }
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdateEmail}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 14 }}
+                      >
+                        Atualizar e-mail
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  ) : settingsOption === "username" ? (
+                    <View>
+                      <TextInput
+                        label="Novo nome de usuário"
+                        mode="outlined"
+                        value={newUsername}
+                        onChangeText={setNewUsername}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdateUsername}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 14 }}
+                      >
+                        Atualizar nome
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  ) : (
+                    <View>
+                      <TextInput
+                        label="Senha atual"
+                        mode="outlined"
+                        value={currentPassword}
+                        onChangeText={setCurrentPassword}
+                        secureTextEntry={!showPassword}
+                        right={
+                          <TextInput.Icon
+                            icon={showPassword ? "eye-off" : "eye"}
+                            onPress={() => setShowPassword(!showPassword)}
+                          />
+                        }
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <TextInput
+                        label="Nova senha"
+                        mode="outlined"
+                        value={newPassword}
+                        onChangeText={setNewPassword}
+                        secureTextEntry={!showPassword}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <TextInput
+                        label="Confirmar nova senha"
+                        mode="outlined"
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        secureTextEntry={!showPassword}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdatePassword}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 10 }}
+                      >
+                        Atualizar senha
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  )}
                 </View>
               ) : null}
 

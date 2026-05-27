@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useDrawerStatus } from "@react-navigation/drawer";
 import { DrawerActions, useNavigation, useRoute } from "@react-navigation/native";
 import { Image } from "expo-image";
@@ -1119,8 +1119,16 @@ export default function MyGroupsScreen() {
       <Modal visible={createVisible} transparent animationType="slide">
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
           <View style={{ backgroundColor: palette.modalSurface, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 20, borderWidth: 1, borderColor: palette.cardBorder }}>
-            <Text style={{ color: palette.textPrimary, fontSize: 18, fontWeight: "800", marginBottom: 12 }}>Novo grupo</Text>
-            <TextInput
+<View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <View>
+          <Text style={{ fontSize: 18, fontWeight: "800", color: palette.textPrimary }}>Criar grupo</Text>
+          <Text style={{ fontSize: 12, color: palette.textMuted, marginTop: 2 }}>Crie e configure seu grupo. </Text>
+        </View>
+        <TouchableOpacity onPress={() => setCreateVisible(false)} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+          <MaterialCommunityIcons name="close" size={16} color={palette.textSecondary} />
+        </TouchableOpacity>
+      </View>            
+      <TextInput
               label="Nome do grupo"
               value={groupName}
               onChangeText={setGroupName}
@@ -1135,10 +1143,10 @@ export default function MyGroupsScreen() {
               theme={inputTheme}
               style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
             />
-            <Button mode="contained" buttonColor={palette.recycleAccent} textColor={palette.panel} onPress={handleCreateGroup} disabled={!groupName.trim()} style={{ marginBottom: 10 }}>
+            <Button mode="contained" buttonColor={palette.recycleAccent} textColor={palette.panel} onPress={handleCreateGroup} style={{ marginBottom: 10 }}>
               Criar grupo
             </Button>
-            <Button mode="text" onPress={() => setCreateVisible(false)}>Cancelar</Button>
+            
           </View>
         </View>
       </Modal>

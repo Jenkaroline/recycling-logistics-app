@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { deleteUser, reload, sendEmailVerification } from "firebase/auth";
+import { deleteUser, reload, sendEmailVerification, verifyBeforeUpdateEmail } from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useRef, useState } from "react";
 // using Ionicons for the hero icon instead of the app logo
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
@@ -14,11 +15,13 @@ import ErrorMessage from "../components/ErrorMessage";
 import SuccessMessage from "../components/SuccessMessage";
 import WavesBackground from "../components/WavesBackground";
 
+const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
+
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   Main: undefined;
-  VerifyEmail: { message?: string; error?: string } | undefined;
+  VerifyEmail: { message?: string; error?: string; flow?: "register" | "email-change"; email?: string } | undefined;
 };
 
 export default function VerifyEmailScreen() {
@@ -36,6 +39,8 @@ export default function VerifyEmailScreen() {
   const route = useRoute();
   const routeParams: any = route.params;
   const errorFromParams = routeParams?.error || "";
+  const verificationFlow = routeParams?.flow || "register";
+  const pendingEmail = routeParams?.email || user?.email || "";
 
   const palette = darkModeEnabled
     ? {
@@ -74,10 +79,17 @@ export default function VerifyEmailScreen() {
     setError("");
     if (user) {
       try {
-        await sendEmailVerification(user, {
-          url: "https://jenkaroline.github.io/recycling-logistics-app/action",
-          handleCodeInApp: true,
-        });
+        if (verificationFlow === "email-change" && pendingEmail) {
+          await verifyBeforeUpdateEmail(user, pendingEmail, {
+            url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+            handleCodeInApp: true,
+          });
+        } else {
+          await sendEmailVerification(user, {
+            url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+            handleCodeInApp: true,
+          });
+        }
         setEmailSent(true);
         // start resend cooldown
         startResendCooldown(60);
@@ -124,12 +136,22 @@ export default function VerifyEmailScreen() {
     setChecking(true);
     setError("");
     try {
-      if (user) {
-        await reload(user);
-        if (user.emailVerified) {
-          navigation.navigate("Main");
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        await reload(currentUser);
+        const refreshedUser = auth.currentUser ?? currentUser;
+        const emailMatchesPending = verificationFlow !== "email-change" || !pendingEmail || refreshedUser.email === pendingEmail;
+        if (refreshedUser.emailVerified && emailMatchesPending) {
+          if (verificationFlow === "email-change") {
+            await AsyncStorage.removeItem(PENDING_EMAIL_CHANGE_KEY);
+          }
+          navigation.reset({ index: 0, routes: [{ name: "Main" }] });
         } else {
-          setError("E-mail ainda não verificado.");
+          setError(
+            verificationFlow === "email-change"
+              ? "A troca de e-mail ainda não foi concluída. Confirme no link e tente novamente."
+              : "E-mail ainda não verificado. Se você acabou de confirmar no link, aguarde alguns segundos e tente novamente.",
+          );
         }
       }
     } catch (e: any) {
@@ -170,7 +192,7 @@ export default function VerifyEmailScreen() {
       <TouchableOpacity
         onPress={async () => {
           const currentUser = auth.currentUser;
-          if (currentUser && !currentUser.emailVerified) {
+          if (verificationFlow === "register" && currentUser && !currentUser.emailVerified) {
             try {
               await deleteUser(currentUser);
             } catch (deleteError) {
@@ -208,7 +230,7 @@ export default function VerifyEmailScreen() {
         ) : (
           <Text style={[styles.description, { color: palette.textSecondary }]}> 
             {emailSent
-              ? `Enviamos o código para ${user?.email}. Abra seu e-mail e volte aqui para continuar.`
+              ? `Enviamos o código para ${pendingEmail || user?.email}. Abra seu e-mail e volte aqui para continuar.`
               : "Toque para enviar o email de verificação e liberar as próximas ações."}
           </Text>
         )}

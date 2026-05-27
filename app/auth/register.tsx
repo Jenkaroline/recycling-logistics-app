@@ -21,7 +21,7 @@ type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   Main: undefined;
-  VerifyEmail: { message?: string; error?: string } | undefined;
+  VerifyEmail: { message?: string; error?: string; email?: string } | undefined;
 };
 
 export default function RegisterScreen() {
@@ -162,7 +162,7 @@ export default function RegisterScreen() {
         setStatusMessage("Enviando confirmação por e-mail...");
         await withTimeout(
           sendEmailVerification(userCredential.user, {
-            url: "https://jenkaroline.github.io/recycling-logistics-app/action",
+            url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
             handleCodeInApp: true,
           }),
           "Envio da confirmação por e-mail",
@@ -173,7 +173,7 @@ export default function RegisterScreen() {
           routes: [
             {
               name: "VerifyEmail",
-              params: { message: "Conta criada com sucesso! Verifique seu e-mail." },
+              params: { message: "Conta criada com sucesso! Verifique seu e-mail.", email: userCredential.user.email || email },
             },
           ],
         });

@@ -5,7 +5,8 @@ import {
   DrawerItem,
 } from "@react-navigation/drawer";
 import { DrawerActions } from "@react-navigation/native";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, reload } from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSocial } from "../src/SocialContext";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { Image } from "react-native";
@@ -40,6 +41,8 @@ import RecordsScreen from "./records";
 import NotificationsScreen from "../src/NotificationsScreen";
 import SettingsScreen from "./settings";
 import StatisticsScreen from "./statistics";
+
+const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
 
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
@@ -296,17 +299,60 @@ function AppDrawer() {
   );
 }
 
-function AuthenticatedApp() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
-    </Stack.Navigator>
-  );
-}
+function AppGate() {
+  const [currentUser, setCurrentUser] = React.useState(auth.currentUser);
+  const [pendingEmailChange, setPendingEmailChange] = React.useState<string | null>(null);
+  const [authReady, setAuthReady] = React.useState(false);
 
-function AuthScreens() {
+  React.useEffect(() => {
+    let mounted = true;
+    void AsyncStorage.getItem(PENDING_EMAIL_CHANGE_KEY).then((value) => {
+      if (mounted) {
+        setPendingEmailChange(value || null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          await reload(user);
+        } catch {
+          // keep the current snapshot if reload fails
+        }
+        setCurrentUser(auth.currentUser ?? user);
+      } else {
+        setCurrentUser(null);
+      }
+      setAuthReady(true);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  if (!authReady) {
+    return null;
+  }
+
+  const initialRouteName = currentUser?.emailVerified
+    ? pendingEmailChange
+      ? "VerifyEmail"
+      : "Main"
+    : currentUser
+      ? "VerifyEmail"
+      : "Login";
+
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      key={currentUser ? (currentUser.emailVerified && !pendingEmailChange ? "main" : "verify") : "auth"}
+      screenOptions={{ headerShown: false }}
+      initialRouteName={initialRouteName}
+    >
       <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
@@ -316,6 +362,7 @@ function AuthScreens() {
         component={ResetPasswordConfirmScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }
@@ -329,18 +376,7 @@ export default function MainNavigator() {
             <RecyclingTypesProvider>
               <SocialProvider>
                 <RecyclingCompetitionProvider>
-                  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
-                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
-                    <Stack.Screen
-                      name="ResetPasswordConfirm"
-                      component={ResetPasswordConfirmScreen}
-                      options={{ headerShown: false }}
-                    />
-                    <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
-                  </Stack.Navigator>
+                  <AppGate />
                 </RecyclingCompetitionProvider>
               </SocialProvider>
             </RecyclingTypesProvider>

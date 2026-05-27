@@ -210,6 +210,7 @@ export default function HomeScreen() {
   const [newCategoryIcon, setNewCategoryIcon] = useState(
     "package-variant-closed",
   );
+  const [showAllIcons, setShowAllIcons] = useState(false);
   const ecopontoEnsuredRef = useRef(false);
   const currentDayKey = useCurrentDayKey();
 
@@ -266,18 +267,26 @@ export default function HomeScreen() {
   const itemHeight = 48;
   const containerHeight = Math.max(60, lastEntries.length * itemHeight + 20);
 
-  const ICON_OPTIONS = [
-    "shopping-outline",
-    "bottle-soda-outline",
-    "bowl-outline",
-    "package-variant-closed",
-    "cup-straw-outline",
-    "silverware-fork-knife",
-    "compact-disc",
-    "headphones",
-    "flask-outline",
-    "gift-outline",
-  ];
+const ICON_OPTIONS = [
+  "bottle-soda-outline",
+  "bottle-wine-outline",
+  "cup-outline",
+  "cup-water",
+  "food-fork-drink",
+  "bag-personal-outline",
+  "shopping-outline",
+  "package-variant-closed",
+  "bowl-outline",
+  "silverware-fork-knife",
+  "spray-bottle",
+  "needle",
+  "toothbrush-outline",
+  "hanger",
+  "washing-machine",
+  "trash-can-outline",
+  "recycle",
+  "leaf-circle-outline",
+];
 
   const { width } = useWindowDimensions();
   const isCompactWidth = width < 430;
@@ -799,31 +808,98 @@ export default function HomeScreen() {
       </Animated.View>
         </ScrollView>
       </View>
-
-      <Modal visible={modalVisible} transparent={true} animationType="slide">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: palette.modalSurface, borderColor: palette.panelAlt, borderWidth: 1, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, minHeight: 300 }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: palette.textPrimary }}>Criar categoria</Text>
-
-            <TextInput label="Nome da categoria" value={newCategoryName} onChangeText={setNewCategoryName} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput }} />
-
-            <TextInput label="Peso em gramas" value={newCategoryWeight} onChangeText={setNewCategoryWeight} keyboardType="numeric" mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput }} />
-
-            <Text style={{ fontSize: 14, fontWeight: "600", marginBottom: 8, color: palette.textPrimary }}>Escolha um ícone:</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 16 }}>
-              {ICON_OPTIONS.map((icon) => (
-                <TouchableOpacity key={icon} onPress={() => setNewCategoryIcon(icon)} style={{ width: "20%", paddingVertical: 8, alignItems: "center", backgroundColor: newCategoryIcon === icon ? palette.modalChip : palette.modalChipIdle, borderRadius: 8, marginBottom: 8 }}>
-                  <MaterialCommunityIcons name={icon as any} size={28} color={newCategoryIcon === icon ? palette.modalChipText : palette.modalChipMuted} />
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Button mode="contained" buttonColor={inGoal ? palette.recycleAccent : palette.danger} textColor={palette.panel} onPress={handleAddCategory} disabled={!newCategoryName.trim() || !newCategoryWeight.trim()} style={{ marginBottom: 10 }}>Criar</Button>
-
-            <Button mode="text" onPress={() => setModalVisible(false)}>Cancelar</Button>
-          </View>
+<Modal visible={modalVisible} transparent={true} animationType="slide">
+  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
+    <View style={{ backgroundColor: palette.modalSurface, borderColor: palette.cardBorder, borderWidth: 1, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: insets.bottom + 24 }}>
+      
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <View>
+          <Text style={{ fontSize: 18, fontWeight: "800", color: palette.textPrimary }}>Nova categoria</Text>
+          <Text style={{ fontSize: 12, color: palette.textMuted, marginTop: 2 }}>Defina nome, peso e ícone. </Text>
         </View>
-      </Modal>
+        <TouchableOpacity onPress={() => setModalVisible(false)} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+          <MaterialCommunityIcons name="close" size={16} color={palette.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Inputs */}
+      <TextInput
+        label="Nome da categoria"
+        value={newCategoryName}
+        onChangeText={setNewCategoryName}
+        mode="outlined"
+        style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+        theme={{ colors: { primary: palette.recycleAccent, onSurfaceVariant: palette.textMuted, onSurface: palette.textPrimary, outline: palette.cardBorder } }}
+      />
+      <TextInput
+        label="Peso em gramas"
+        value={newCategoryWeight}
+        onChangeText={setNewCategoryWeight}
+        keyboardType="numeric"
+        mode="outlined"
+        style={{ marginBottom: 20, backgroundColor: palette.modalInput }}
+        theme={{ colors: { primary: palette.recycleAccent, onSurfaceVariant: palette.textMuted, onSurface: palette.textPrimary, outline: palette.cardBorder } }}
+      />
+
+      {/* Ícones */}
+<Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 0.8, color: palette.textSecondary, marginBottom: 8 }}>ÍCONE</Text>
+<Text style={{ fontSize: 11, color: palette.textMuted, marginBottom: 12 }}>
+  <MaterialCommunityIcons name="gesture-swipe-horizontal" size={12} color={palette.textMuted} /> Deslize para ver mais
+</Text>
+<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }} style={{ marginBottom: 24 }}>
+  {ICON_OPTIONS.map((icon) => {
+    const selected = newCategoryIcon === icon;
+    return (
+      <TouchableOpacity
+        key={icon}
+        onPress={() => setNewCategoryIcon(icon)}
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: 16,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: selected ? (inGoal ? palette.recycleSoft : palette.consSoft) : palette.panelAlt,
+          borderWidth: 1.5,
+          borderColor: selected ? (inGoal ? palette.recycleAccent : palette.danger) : "transparent",
+        }}
+      >
+        <MaterialCommunityIcons
+          name={icon as any}
+          size={24}
+          color={selected ? (inGoal ? palette.recycleAccent : palette.danger) : palette.textMuted}
+        />
+      </TouchableOpacity>
+    );
+  })}
+</ScrollView>
+
+      {/* Botões */}
+      <Button
+        mode="contained"
+        buttonColor={
+          !newCategoryName.trim() || !newCategoryWeight.trim()
+            ? palette.panelAlt
+            : inGoal ? palette.recycleAccent : palette.danger
+        }
+        textColor={
+          !newCategoryName.trim() || !newCategoryWeight.trim()
+            ? palette.textMuted
+            : palette.panel
+        }
+        onPress={() => {
+          if (!newCategoryName.trim() || !newCategoryWeight.trim()) return;
+          handleAddCategory();
+        }}
+        style={{ borderRadius: 14, marginBottom: 8 }}
+        contentStyle={{ paddingVertical: 4 }}
+      >
+        Criar categoria
+      </Button>
+    </View>
+  </View>
+</Modal>
       
       <Modal visible={goalModalVisible} transparent={true} animationType="slide">
   <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
