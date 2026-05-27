@@ -4,7 +4,7 @@ import { collection, limit, onSnapshot, orderBy, query } from "firebase/firestor
 import { auth, db } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "./RecyclingCompetitionContext";
 
-export type AppNotificationKind = "invitation" | "invitation-response" | "chat" | "evidence";
+export type AppNotificationKind = "invitation" | "invitation-response" | "chat" | "evidence" | "member-removed";
 
 export type AppNotificationItem = {
   id: string;
@@ -37,6 +37,16 @@ type EvidenceDoc = {
   authorName?: string;
   type?: string;
   notes?: string | null;
+  createdAt?: string;
+};
+
+type UserNotificationDoc = {
+  type?: string;
+  groupId?: string;
+  groupName?: string;
+  actorName?: string;
+  title?: string;
+  description?: string;
   createdAt?: string;
 };
 
@@ -103,6 +113,7 @@ export function useAppNotifications() {
   const currentUid = auth.currentUser?.uid || null;
   const [chatByGroup, setChatByGroup] = useState<Record<string, AppNotificationItem[]>>({});
   const [evidenceByGroup, setEvidenceByGroup] = useState<Record<string, AppNotificationItem[]>>({});
+  const [userNotifications, setUserNotifications] = useState<AppNotificationItem[]>([]);
   const [seenTimestamp, setSeenTimestamp] = useState(0);
   const seenTimestampRef = useRef(0);
 
@@ -218,6 +229,58 @@ export function useAppNotifications() {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [currentUid, groupIdsKey, groupNameById, relevantGroups]);
+
+  // listen for user-scoped notifications such as member removals
+  useEffect(() => {
+    if (!currentUid) {
+      setUserNotifications([]);
+      return;
+    }
+
+    const notificationsQuery = query(
+      collection(db, "users", currentUid, "competitionNotifications"),
+      orderBy("createdAt", "desc"),
+      limit(30),
+    );
+
+    return onSnapshot(
+      notificationsQuery,
+      (snapshot) => {
+        const items = snapshot.docs
+          .map((snap) => {
+            const data = snap.data() as UserNotificationDoc;
+            const rawCreatedAt = toIsoString(data.createdAt);
+
+            if (data.type === "member-removed") {
+              return {
+                id: `usernotif-${snap.id}`,
+                sourceId: snap.id,
+                kind: "member-removed",
+                groupId: data.groupId || "",
+                groupName: data.groupName || "Grupo",
+                title: data.title || data.groupName || "Grupo",
+                description: data.description || `${data.actorName || "Alguém"} removeu você do grupo.`,
+                actorName: data.actorName || undefined,
+                timestamp: toTimestamp(rawCreatedAt),
+                rawCreatedAt,
+              } satisfies AppNotificationItem;
+            }
+
+            return null;
+          })
+          .filter((item): item is AppNotificationItem => item !== null);
+
+        setUserNotifications(items);
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setUserNotifications([]);
+          return;
+        }
+        console.warn("[useAppNotifications] user notifications listener failed:", error);
+      },
+    );
+  }, [currentUid]);
 
   useEffect(() => {
     if (!currentUid || relevantGroups.length === 0) {
@@ -395,15 +458,16 @@ export function useAppNotifications() {
           rawCreatedAt,
         } satisfies AppNotificationItem;
       })
-      .filter((item) => item.status === "pending" || item.kind === "invitation-response");
+        // Only show pending invitations to the recipient; owners only see responses (accepted/declined)
+        .filter((item) => (item.recipientUid === currentUid && item.status === "pending") || item.status !== "pending");
   }, [groupInvitations, currentUid]);
 
   const chatNotifications = useMemo(() => Object.values(chatByGroup).flat(), [chatByGroup]);
   const evidenceNotifications = useMemo(() => Object.values(evidenceByGroup).flat(), [evidenceByGroup]);
 
   const notifications = useMemo(() => {
-    return [...invitationNotifications, ...chatNotifications, ...evidenceNotifications].sort((a, b) => b.timestamp - a.timestamp);
-  }, [invitationNotifications, chatNotifications, evidenceNotifications]);
+    return [...invitationNotifications, ...chatNotifications, ...evidenceNotifications, ...userNotifications].sort((a, b) => b.timestamp - a.timestamp);
+  }, [invitationNotifications, chatNotifications, evidenceNotifications, userNotifications]);
 
   const unreadNotifications = useMemo(() => {
     return notifications.filter((notification) => {

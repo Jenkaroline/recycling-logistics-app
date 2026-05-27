@@ -1,4 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useDrawerStatus } from "@react-navigation/drawer";
 import { DrawerActions, useNavigation, useRoute } from "@react-navigation/native";
 import { Image } from "expo-image";
@@ -17,7 +18,7 @@ import { captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { db } from "../service/firebaseConfig";
 
 type GroupTab = "stats" | "feed" | "chat";
-type ManageAction = "rename" | "addMember" | "critical" | null;
+type ManageAction = "rename" | "addMember" | "critical" | "members" | null;
 
 type GroupEvidenceEntry = {
   id: string;
@@ -111,6 +112,7 @@ export default function MyGroupsScreen() {
   const route = useRoute<any>();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
   const { darkModeEnabled } = useThemePreference();
   const { addAction: addRecyclingAction } = useRecycling();
   const { types: recyclingTypes } = useRecyclingTypes();
@@ -123,6 +125,9 @@ export default function MyGroupsScreen() {
     activateGroup,
     deactivateGroup,
     updateGroupName,
+    updateGroupDetails,
+    removeMember,
+    leaveGroup,
     deleteGroup,
     addChatMessage,
     sendGroupInvitation,
@@ -133,12 +138,17 @@ export default function MyGroupsScreen() {
 
   const [createVisible, setCreateVisible] = useState(false);
   const [groupName, setGroupName] = useState("");
+  const [groupDescription, setGroupDescription] = useState("");
+  const [groupDurationDays, setGroupDurationDays] = useState("7");
+  const [groupImageUrl, setGroupImageUrl] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<GroupTab>("stats");
   const [messageText, setMessageText] = useState("");
   const [manageMenuVisible, setManageMenuVisible] = useState(false);
   const [manageAction, setManageAction] = useState<ManageAction>(null);
   const [manageGroupName, setManageGroupName] = useState("");
+  const [manageGroupDescription, setManageGroupDescription] = useState("");
+  const [manageGroupImageUrl, setManageGroupImageUrl] = useState("");
   const [manageMemberName, setManageMemberName] = useState("");
   const [groupEvidenceEntries, setGroupEvidenceEntries] = useState<GroupEvidenceEntry[]>([]);
   const [recordModalVisible, setRecordModalVisible] = useState(false);
@@ -146,6 +156,75 @@ export default function MyGroupsScreen() {
   const [contestReason, setContestReason] = useState("");
   const [contestTargetEntry, setContestTargetEntry] = useState<GroupEvidenceEntry | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
+
+  const resetCreateForm = () => {
+    setGroupName("");
+    setGroupDescription("");
+    setGroupDurationDays("7");
+    setGroupImageUrl("");
+  };
+
+  const handlePickGroupImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permissão", "Permita acesso à galeria para adicionar a imagem do grupo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.3,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const mimeType = asset.mimeType || "image/jpeg";
+    const dataUrl = `data:${mimeType};base64,${asset.base64}`;
+
+    if (dataUrl.length > 900000) {
+      Alert.alert("Imagem grande demais", "Escolha uma foto menor para salvar no Firestore.");
+      return;
+    }
+
+    setGroupImageUrl(dataUrl);
+  };
+
+  const handlePickManageGroupImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permissão", "Permita acesso à galeria para atualizar a imagem do grupo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.3,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const mimeType = asset.mimeType || "image/jpeg";
+    const dataUrl = `data:${mimeType};base64,${asset.base64}`;
+
+    if (dataUrl.length > 900000) {
+      Alert.alert("Imagem grande demais", "Escolha uma foto menor para salvar no Firestore.");
+      return;
+    }
+
+    setManageGroupImageUrl(dataUrl);
+  };
 
   const palette: GroupPalette = darkModeEnabled
     ? {
@@ -273,7 +352,10 @@ export default function MyGroupsScreen() {
 
   const groupMembers = useMemo(() => {
     if (!selectedGroup) return [];
-    return [...rankedMembers];
+    return [...(selectedGroup.members || [])].sort((a, b) => {
+      if (b.totalXp !== a.totalXp) return b.totalXp - a.totalXp;
+      return a.name.localeCompare(b.name, "pt-BR");
+    });
   }, [rankedMembers, selectedGroup]);
 
   const groupFeed = useMemo(() => {
@@ -337,8 +419,14 @@ export default function MyGroupsScreen() {
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) return;
-    await createGroup(groupName.trim());
-    setGroupName("");
+    const durationDays = Number.parseInt(groupDurationDays, 10);
+    await createGroup({
+      name: groupName.trim(),
+      description: groupDescription.trim(),
+      durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 7,
+      imageUrl: groupImageUrl,
+    });
+    resetCreateForm();
     setCreateVisible(false);
   };
 
@@ -382,6 +470,8 @@ export default function MyGroupsScreen() {
   const openManageGroup = () => {
     if (!selectedGroup) return;
     setManageGroupName(selectedGroup.name);
+    setManageGroupDescription(selectedGroup.description || "");
+    setManageGroupImageUrl(selectedGroup.imageUrl || "");
     setManageMemberName("");
     setManageAction(null);
     setManageMenuVisible(true);
@@ -390,17 +480,41 @@ export default function MyGroupsScreen() {
   const closeManageAction = () => {
     setManageAction(null);
     setManageMenuVisible(false);
+    resetManageForm();
+  };
+
+  const resetManageForm = () => {
+    setManageGroupName("");
+    setManageGroupDescription("");
+    setManageGroupImageUrl("");
+    setManageMemberName("");
   };
 
   const handleRenameGroup = async () => {
     if (!selectedGroup) return;
     const nextName = manageGroupName.trim();
-    if (!nextName || nextName === selectedGroup.name) return;
-    await updateGroupName(selectedGroup.id, nextName);
+    const nextDescription = manageGroupDescription.trim();
+    const nextImageUrl = manageGroupImageUrl;
+
+    if (
+      (!nextName || nextName === selectedGroup.name) &&
+      nextDescription === (selectedGroup.description || "") &&
+      nextImageUrl === (selectedGroup.imageUrl || "")
+    ) {
+      return;
+    }
+
+    await updateGroupDetails(selectedGroup.id, {
+      name: nextName || selectedGroup.name,
+      description: nextDescription,
+      imageUrl: nextImageUrl,
+    });
     setManageGroupName(nextName);
+    setManageGroupDescription(nextDescription);
+    setManageGroupImageUrl(nextImageUrl);
     setManageAction(null);
     setManageMenuVisible(false);
-    Alert.alert("Nome atualizado", `O grupo agora se chama \"${nextName}\".`);
+    Alert.alert("Grupo atualizado", "As informações do grupo foram salvas.");
   };
 
   const handleAddMember = async () => {
@@ -483,6 +597,59 @@ export default function MyGroupsScreen() {
 
       Alert.alert("Falha inesperada", translateFirebaseError(error));
     }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!selectedGroup) return;
+    const member = selectedGroup.members.find((m) => m.id === memberId);
+    if (!member) return;
+
+    Alert.alert(
+      "Remover membro",
+      `Remover ${member.name} do grupo?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Remover",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await removeMember(selectedGroup.id, memberId);
+              Alert.alert("Removido", `${member.name} foi removido do grupo.`);
+            } catch (err) {
+              console.error("[handleRemoveMember]", err);
+              Alert.alert("Erro", "Não foi possível remover o membro. Tente novamente.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!selectedGroup) return;
+    Alert.alert(
+      "Sair do grupo",
+      `Deseja sair do grupo ${selectedGroup.name}?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sair",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await leaveGroup(selectedGroup.id);
+              setManageMenuVisible(false);
+              setSelectedGroupId(null);
+              Alert.alert("Saída", "Você saiu do grupo.");
+            } catch (err) {
+              console.error("[handleLeaveGroup]", err);
+              Alert.alert("Erro", "Não foi possível sair do grupo. Tente novamente.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleAddGroupRecord = async (item: { id: string; type: string; xp: number }) => {
@@ -645,6 +812,9 @@ export default function MyGroupsScreen() {
               onPress={() => void openGroup(group.id)}
               style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 16, marginTop: 20 }}
             >
+              {group.imageUrl ? (
+                <Image source={{ uri: group.imageUrl }} style={{ width: "100%", height: 140, borderRadius: 14, marginBottom: 12, backgroundColor: palette.panelAlt }} contentFit="cover" transition={180} />
+              ) : null}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 17 }}>{group.name}</Text>
                 <View
@@ -662,8 +832,14 @@ export default function MyGroupsScreen() {
                   </Text>
                 </View>
               </View>
+              {group.description ? (
+                <Text style={{ color: palette.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 8 }} numberOfLines={2}>
+                  {group.description}
+                </Text>
+              ) : null}
               <Text style={{ color: palette.textSecondary, fontSize: 12 }}>
                 {group.totalXp} XP • {group.totalActions} registro(s) • {group.members.length} membro(s)
+                {group.durationDays ? ` • ${group.durationDays} dia(s)` : ""}
               </Text>
             </TouchableOpacity>
           ))}
@@ -694,9 +870,30 @@ export default function MyGroupsScreen() {
             <Ionicons name="arrow-back" size={20} color={palette.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1, marginLeft: 12, alignItems: "center" }}>
+            {selectedGroup.imageUrl ? (
+              <Image source={{ uri: selectedGroup.imageUrl }} style={{ width: 72, height: 72, borderRadius: 18, marginBottom: 8, backgroundColor: palette.panelAlt }} contentFit="cover" transition={180} />
+            ) : (
+              <View style={{ width: 72, height: 72, borderRadius: 18, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+                <MaterialCommunityIcons name="group" size={32} color={palette.recycleAccent} />
+              </View>
+            )}
             <Text style={{ color: palette.textPrimary, fontSize: 24, fontWeight: "900", marginTop: 2 }} numberOfLines={1}>
               {selectedGroup.name}
             </Text>
+            {(selectedGroup.members || []).some((m) => m.id === currentUserId) && selectedGroup.ownerId !== currentUserId ? (
+              <Text style={{ color: palette.textMuted, fontSize: 12, marginTop: 4 }}>Você participa deste grupo</Text>
+            ) : null}
+
+            {selectedGroup.description ? (
+              <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 4, textAlign: "center" }} numberOfLines={2}>
+                {selectedGroup.description}
+              </Text>
+            ) : null}
+            {selectedGroup.durationDays ? (
+              <Text style={{ color: palette.textMuted, fontSize: 11, marginTop: 4 }}>
+                Desafio por {selectedGroup.durationDays} dia(s)
+              </Text>
+            ) : null}
           </View>
           {canManageSelectedGroup ? (
             <TouchableOpacity
@@ -706,7 +903,15 @@ export default function MyGroupsScreen() {
               <Ionicons name="settings-outline" size={18} color={palette.textPrimary} />
             </TouchableOpacity>
           ) : (
-            <View style={{ width: 42, height: 42 }} />
+            <TouchableOpacity
+              onPress={() => {
+                setManageAction("members");
+                setManageMenuVisible(true);
+              }}
+              style={{ width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name="people-outline" size={18} color={palette.textPrimary} />
+            </TouchableOpacity>
           )}
         </View>
 
@@ -731,6 +936,8 @@ export default function MyGroupsScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+       
 
         {selectedTab === "stats" ? (
           <View style={{ gap: 12 }}>
@@ -1062,7 +1269,7 @@ export default function MyGroupsScreen() {
           <View style={{ height: 64 - insets.top - 28, paddingHorizontal: 12, justifyContent: "center" }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <TouchableOpacity
-                onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+                onPress={() => drawerNavigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
                 style={{
                   width: 44,
                   height: 44,
@@ -1124,14 +1331,70 @@ export default function MyGroupsScreen() {
           <Text style={{ fontSize: 18, fontWeight: "800", color: palette.textPrimary }}>Criar grupo</Text>
           <Text style={{ fontSize: 12, color: palette.textMuted, marginTop: 2 }}>Crie e configure seu grupo. </Text>
         </View>
-        <TouchableOpacity onPress={() => setCreateVisible(false)} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+        <TouchableOpacity onPress={() => { resetCreateForm(); setCreateVisible(false); }} style={{ width: 32, height: 32, borderRadius: 999, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
           <MaterialCommunityIcons name="close" size={16} color={palette.textSecondary} />
         </TouchableOpacity>
       </View>            
+      <TouchableOpacity
+        onPress={() => void handlePickGroupImage()}
+        style={{
+          height: 150,
+          borderRadius: 16,
+          overflow: "hidden",
+          backgroundColor: palette.panelAlt,
+          borderWidth: 1,
+          borderColor: palette.cardBorder,
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 12,
+        }}
+      >
+        {groupImageUrl ? (
+          <Image source={{ uri: groupImageUrl }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={180} />
+        ) : (
+          <View style={{ alignItems: "center", gap: 6 }}>
+            <MaterialCommunityIcons name="image-plus" size={30} color={palette.recycleAccent} />
+            <Text style={{ color: palette.textSecondary, fontSize: 12 }}>Adicionar imagem do desafio</Text>
+          </View>
+        )}
+      </TouchableOpacity>
       <TextInput
               label="Nome do grupo"
               value={groupName}
               onChangeText={setGroupName}
+              mode="outlined"
+              textColor={palette.textPrimary}
+              placeholderTextColor={palette.textSecondary}
+              selectionColor={palette.recycleAccent}
+              cursorColor={palette.recycleAccent}
+              outlineColor={palette.cardBorder}
+              activeOutlineColor={palette.recycleAccent}
+              outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+              theme={inputTheme}
+              style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+            />
+            <TextInput
+              label="Descrição"
+              value={groupDescription}
+              onChangeText={setGroupDescription}
+              mode="outlined"
+              multiline
+              numberOfLines={3}
+              textColor={palette.textPrimary}
+              placeholderTextColor={palette.textSecondary}
+              selectionColor={palette.recycleAccent}
+              cursorColor={palette.recycleAccent}
+              outlineColor={palette.cardBorder}
+              activeOutlineColor={palette.recycleAccent}
+              outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+              theme={inputTheme}
+              style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+            />
+            <TextInput
+              label="Duração do desafio (dias)"
+              value={groupDurationDays}
+              onChangeText={setGroupDurationDays}
+              keyboardType="number-pad"
               mode="outlined"
               textColor={palette.textPrimary}
               placeholderTextColor={palette.textSecondary}
@@ -1190,8 +1453,12 @@ export default function MyGroupsScreen() {
         <View style={{ flex: 1, backgroundColor: palette.bg, paddingTop: insets.top + 12 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginBottom: 16 }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>CONFIGURAÇÃO</Text>
-              <Text style={{ color: palette.textPrimary, fontSize: 28, fontWeight: "900", marginTop: 2 }}>Gerenciar grupo</Text>
+              <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>
+                {canManageSelectedGroup ? "CONFIGURAÇÃO" : "MEMBROS"}
+              </Text>
+              <Text style={{ color: palette.textPrimary, fontSize: 28, fontWeight: "900", marginTop: 2 }}>
+                {canManageSelectedGroup ? "Gerenciar grupo" : "Participação no grupo"}
+              </Text>
             </View>
             <TouchableOpacity
               onPress={closeManageAction}
@@ -1202,220 +1469,395 @@ export default function MyGroupsScreen() {
           </View>
 
           <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 14, paddingHorizontal: 20 }}>
-            Escolha o que deseja ajustar.
+            {canManageSelectedGroup ? "Escolha o que deseja ajustar." : "Veja quem faz parte do grupo e saia se quiser."}
           </Text>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
-            <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
-              <TouchableOpacity
-                onPress={() => setManageAction((current) => (current === "rename" ? null : "rename"))}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
-              >
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Renomear grupo</Text>
-                </View>
-                <Ionicons name={manageAction === "rename" ? "chevron-up" : "create-outline"} size={20} color={palette.textSecondary} />
-              </TouchableOpacity>
+          {canManageSelectedGroup ? (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
+              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
+                <TouchableOpacity
+                  onPress={() => setManageAction((current) => (current === "rename" ? null : "rename"))}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar informações</Text>
+                  </View>
+                  <Ionicons name={manageAction === "rename" ? "chevron-up" : "create-outline"} size={20} color={palette.textSecondary} />
+                </TouchableOpacity>
 
-              {manageAction === "rename" ? (
-                <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
-                  <TextInput
-                    label="Nome do grupo"
-                    value={manageGroupName}
-                    onChangeText={setManageGroupName}
-                    mode="outlined"
-                    textColor={palette.textPrimary}
-                    placeholderTextColor={palette.textSecondary}
-                    selectionColor={palette.recycleAccent}
-                    cursorColor={palette.recycleAccent}
-                    outlineColor={palette.cardBorder}
-                    activeOutlineColor={palette.recycleAccent}
-                    outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
-                    theme={inputTheme}
-                    style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
-                  />
-                  <Button
-                    mode="contained"
-                    onPress={async () => {
-                      if (!manageGroupName.trim() || manageGroupName.trim() === selectedGroup?.name) {
-                        Alert.alert("Preencha o nome", "Informe um nome válido e diferente do atual.");
-                        return;
-                      }
-                      await handleRenameGroup();
-                    }}
-                    buttonColor={palette.recycleAccent}
-                    textColor={palette.panel}
-                  >
-                    Salvar nome
-                  </Button>
-                </View>
-              ) : null}
-            </View>
+                {manageAction === "rename" ? (
+                  <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
+                    <TouchableOpacity
+                      onPress={() => void handlePickManageGroupImage()}
+                      style={{
+                        height: 150,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        backgroundColor: palette.panelAlt,
+                        borderWidth: 1,
+                        borderColor: palette.cardBorder,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginBottom: 12,
+                      }}
+                    >
+                      {manageGroupImageUrl ? (
+                        <Image source={{ uri: manageGroupImageUrl }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={180} />
+                      ) : (
+                        <View style={{ alignItems: "center", gap: 6 }}>
+                          <MaterialCommunityIcons name="image-plus" size={30} color={palette.recycleAccent} />
+                          <Text style={{ color: palette.textSecondary, fontSize: 12 }}>Atualizar imagem do grupo</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    <TextInput
+                      label="Nome do grupo"
+                      value={manageGroupName}
+                      onChangeText={setManageGroupName}
+                      mode="outlined"
+                      textColor={palette.textPrimary}
+                      placeholderTextColor={palette.textSecondary}
+                      selectionColor={palette.recycleAccent}
+                      cursorColor={palette.recycleAccent}
+                      outlineColor={palette.cardBorder}
+                      activeOutlineColor={palette.recycleAccent}
+                      outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+                      theme={inputTheme}
+                      style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+                    />
+                    <TextInput
+                      label="Descrição"
+                      value={manageGroupDescription}
+                      onChangeText={setManageGroupDescription}
+                      mode="outlined"
+                      multiline
+                      numberOfLines={3}
+                      textColor={palette.textPrimary}
+                      placeholderTextColor={palette.textSecondary}
+                      selectionColor={palette.recycleAccent}
+                      cursorColor={palette.recycleAccent}
+                      outlineColor={palette.cardBorder}
+                      activeOutlineColor={palette.recycleAccent}
+                      outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+                      theme={inputTheme}
+                      style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+                    />
+                    <Button
+                      mode="contained"
+                      onPress={async () => {
+                        const nextName = manageGroupName.trim();
+                        const nextDescription = manageGroupDescription.trim();
 
-            <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
-              <TouchableOpacity
-                onPress={() => setManageAction((current) => (current === "addMember" ? null : "addMember"))}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
-              >
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Enviar convite</Text>
-                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>Informe um e-mail cadastrado no app para enviar um convite.</Text>
-                </View>
-                <Ionicons name={manageAction === "addMember" ? "chevron-up" : "person-add-outline"} size={20} color={palette.textSecondary} />
-              </TouchableOpacity>
+                        if (
+                          nextName === (selectedGroup?.name || "") &&
+                          nextDescription === (selectedGroup?.description || "") &&
+                          manageGroupImageUrl === (selectedGroup?.imageUrl || "")
+                        ) {
+                          Alert.alert("Nada para salvar", "Faça alguma alteração antes de salvar.");
+                          return;
+                        }
+                        await handleRenameGroup();
+                      }}
+                      buttonColor={palette.recycleAccent}
+                      textColor={palette.panel}
+                    >
+                      Salvar alterações
+                    </Button>
+                  </View>
+                ) : null}
+              </View>
 
-              {manageAction === "addMember" ? (
-                <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
-                  <TextInput
-                    label="E-mail da pessoa"
-                    value={manageMemberName}
-                    onChangeText={(value) => setManageMemberName(value.replace(/\s+/g, ""))}
-                    mode="outlined"
-                    textColor={palette.textPrimary}
-                    placeholderTextColor={palette.textSecondary}
-                    selectionColor={palette.recycleAccent}
-                    cursorColor={palette.recycleAccent}
-                    outlineColor={palette.cardBorder}
-                    activeOutlineColor={palette.recycleAccent}
-                    outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
-                    theme={inputTheme}
-                    style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
-                  />
-                  <Button
-                    mode="contained"
-                    onPress={async () => {
-                      if (!manageMemberName.trim()) {
-                        Alert.alert("Preencha o e-mail", "Informe o e-mail da pessoa para enviar o convite.");
-                        return;
-                      }
-                      await handleAddMember();
-                    }}
-                    buttonColor={palette.recycleAccent}
-                    textColor={palette.panel}
-                  >
-                    Enviar convite
-                  </Button>
-                </View>
-              ) : null}
-            </View>
+              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
+                <TouchableOpacity
+                  onPress={() => setManageAction((current) => (current === "addMember" ? null : "addMember"))}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Enviar convite</Text>
+                    <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>Informe um e-mail cadastrado no app para enviar um convite.</Text>
+                  </View>
+                  <Ionicons name={manageAction === "addMember" ? "chevron-up" : "person-add-outline"} size={20} color={palette.textSecondary} />
+                </TouchableOpacity>
 
-            <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.dangerBorder, backgroundColor: palette.dangerPanel }}>
-              <TouchableOpacity
-                onPress={() => setManageAction((current) => (current === "critical" ? null : "critical"))}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
-              >
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ color: palette.dangerText, fontWeight: "700" }}>Ações críticas</Text>
-                </View>
-                <Ionicons name={manageAction === "critical" ? "chevron-up" : "warning-outline"} size={20} color={palette.dangerText} />
-              </TouchableOpacity>
+                {manageAction === "addMember" ? (
+                  <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
+                    <TextInput
+                      label="E-mail da pessoa"
+                      value={manageMemberName}
+                      onChangeText={(value) => setManageMemberName(value.replace(/\s+/g, ""))}
+                      mode="outlined"
+                      textColor={palette.textPrimary}
+                      placeholderTextColor={palette.textSecondary}
+                      selectionColor={palette.recycleAccent}
+                      cursorColor={palette.recycleAccent}
+                      outlineColor={palette.cardBorder}
+                      activeOutlineColor={palette.recycleAccent}
+                      outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+                      theme={inputTheme}
+                      style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
+                    />
+                    <Button
+                      mode="contained"
+                      onPress={async () => {
+                        if (!manageMemberName.trim()) {
+                          Alert.alert("Preencha o e-mail", "Informe o e-mail da pessoa para enviar o convite.");
+                          return;
+                        }
+                        await handleAddMember();
+                      }}
+                      buttonColor={palette.recycleAccent}
+                      textColor={palette.panel}
+                    >
+                      Enviar convite
+                    </Button>
+                  </View>
+                ) : null}
+              </View>
 
-              {manageAction === "critical" ? (
-                <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.dangerBorder, padding: 14 }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (selectedGroup?.isActive) {
-                        Alert.alert("Desativar grupo", "Deseja remover este grupo da lista ativa?", [
+              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
+                <TouchableOpacity
+                  onPress={() => setManageAction((current) => (current === "members" ? null : "members"))}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Membros</Text>
+                    <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{selectedGroup?.members.length || 0} participantes</Text>
+                  </View>
+                  <Ionicons name={manageAction === "members" ? "chevron-up" : "people-outline"} size={20} color={palette.textSecondary} />
+                </TouchableOpacity>
+
+                {manageAction === "members" ? (
+                  <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 12 }}>
+                    {(selectedGroup?.members || []).map((member, idx, arr) => {
+                      const initials = (member.name || "").split(" ").map((s) => s.charAt(0)).slice(0, 2).join("").toUpperCase() || "U";
+                      return (
+                        <View key={member.id} style={{ paddingVertical: 10, borderBottomWidth: idx < arr.length - 1 ? 1 : 0, borderBottomColor: palette.cardBorder }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+                              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                                <Text style={{ color: palette.recycleAccent, fontWeight: "900" }}>{initials}</Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: palette.textPrimary, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>{member.name}</Text>
+                                <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{member.isOwner ? "Administrador" : "Membro"}</Text>
+                              </View>
+                            </View>
+                            <View style={{ marginLeft: 12 }}>
+                              {member.id === currentUserId ? (
+                                <Text style={{ color: palette.textSecondary, fontWeight: "700" }}>Você</Text>
+                              ) : canManageSelectedGroup ? (
+                                <TouchableOpacity
+                                  onPress={() => void handleRemoveMember(member.id)}
+                                  style={{ width: 44, height: 36, borderRadius: 10, backgroundColor: palette.dangerBorder, alignItems: "center", justifyContent: "center" }}
+                                >
+                                  <Ionicons name="trash" size={18} color={palette.dangerText} />
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.dangerBorder, backgroundColor: palette.dangerPanel }}>
+                <TouchableOpacity
+                  onPress={() => setManageAction((current) => (current === "critical" ? null : "critical"))}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: palette.dangerText, fontWeight: "700" }}>Ações críticas</Text>
+                  </View>
+                  <Ionicons name={manageAction === "critical" ? "chevron-up" : "warning-outline"} size={20} color={palette.dangerText} />
+                </TouchableOpacity>
+
+                {manageAction === "critical" ? (
+                  <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.dangerBorder, padding: 14 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (selectedGroup?.isActive) {
+                          Alert.alert("Desativar grupo", "Deseja remover este grupo da lista ativa?", [
+                            { text: "Cancelar", style: "cancel" },
+                            {
+                              text: "Desativar",
+                              style: "destructive",
+                              onPress: async () => {
+                                if (!selectedGroup?.id) return;
+                                await deactivateGroup(selectedGroup.id);
+                                setSelectedGroupId(null);
+                                setManageAction(null);
+                                setManageMenuVisible(false);
+                                Alert.alert("Grupo desativado", "O grupo foi removido da lista ativa.");
+                              },
+                            },
+                          ]);
+                          return;
+                        }
+
+                        Alert.alert("Ativar grupo", "Deseja reativar este grupo?", [
                           { text: "Cancelar", style: "cancel" },
                           {
-                            text: "Desativar",
-                            style: "destructive",
+                            text: "Ativar",
                             onPress: async () => {
                               if (!selectedGroup?.id) return;
-                              await deactivateGroup(selectedGroup.id);
-                              setSelectedGroupId(null);
+                              await activateGroup(selectedGroup.id);
+                              await setActiveGroup(selectedGroup.id);
                               setManageAction(null);
                               setManageMenuVisible(false);
-                              Alert.alert("Grupo desativado", "O grupo foi removido da lista ativa.");
+                              Alert.alert("Grupo reativado", "Agora você já pode entrar no grupo.");
                             },
                           },
                         ]);
-                        return;
-                      }
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: palette.panelAlt,
+                        borderWidth: 1,
+                        borderColor: palette.cardBorder,
+                        borderRadius: 14,
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        marginBottom: 10,
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                          {selectedGroup?.isActive ? "Desativar grupo" : "Ativar grupo"}
+                        </Text>
+                        <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                          {selectedGroup?.isActive ? "Remover o grupo da lista ativa." : "Tornar o grupo disponível novamente."}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name={selectedGroup?.isActive ? "pause-circle-outline" : "play-circle-outline"}
+                        size={20}
+                        color={palette.textSecondary}
+                      />
+                    </TouchableOpacity>
 
-                      Alert.alert("Ativar grupo", "Deseja reativar este grupo?", [
-                        { text: "Cancelar", style: "cancel" },
-                        {
-                          text: "Ativar",
-                          onPress: async () => {
-                            if (!selectedGroup?.id) return;
-                            await activateGroup(selectedGroup.id);
-                            await setActiveGroup(selectedGroup.id);
-                            setManageAction(null);
-                            setManageMenuVisible(false);
-                            Alert.alert("Grupo reativado", "Agora você já pode entrar no grupo.");
+                    <TouchableOpacity
+                      onPress={() => {
+                        Alert.alert("Excluir grupo", "Deseja remover este grupo?", [
+                          { text: "Cancelar", style: "cancel" },
+                          {
+                            text: "Excluir",
+                            style: "destructive",
+                            onPress: async () => {
+                              await deleteGroup(selectedGroup?.id || "");
+                              setSelectedGroupId(null);
+                              setManageAction(null);
+                              setManageMenuVisible(false);
+                              Alert.alert("Grupo excluído", "O grupo foi removido com sucesso.");
+                            },
                           },
-                        },
-                      ]);
-                    }}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      backgroundColor: palette.panelAlt,
-                      borderWidth: 1,
-                      borderColor: palette.cardBorder,
-                      borderRadius: 14,
-                      paddingHorizontal: 14,
-                      paddingVertical: 14,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <View style={{ flex: 1, paddingRight: 12 }}>
-                      <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-                        {selectedGroup?.isActive ? "Desativar grupo" : "Ativar grupo"}
-                      </Text>
-                      <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-                        {selectedGroup?.isActive ? "Remover o grupo da lista ativa." : "Tornar o grupo disponível novamente."}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name={selectedGroup?.isActive ? "pause-circle-outline" : "play-circle-outline"}
-                      size={20}
-                      color={palette.textSecondary}
-                    />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      Alert.alert("Excluir grupo", "Deseja remover este grupo?", [
-                        { text: "Cancelar", style: "cancel" },
-                        {
-                          text: "Excluir",
-                          style: "destructive",
-                          onPress: async () => {
-                            await deleteGroup(selectedGroup?.id || "");
-                            setSelectedGroupId(null);
-                            setManageAction(null);
-                            setManageMenuVisible(false);
-                            Alert.alert("Grupo excluído", "O grupo foi removido com sucesso.");
-                          },
-                        },
-                      ]);
-                    }}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      backgroundColor: palette.panelAlt,
-                      borderWidth: 1,
-                      borderColor: palette.cardBorder,
-                      borderRadius: 14,
-                      paddingHorizontal: 14,
-                      paddingVertical: 14,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <View style={{ flex: 1, paddingRight: 12 }}>
-                      <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Remover grupo</Text>
-                      <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>Excluir o grupo permanentemente.</Text>
-                    </View>
-                    <Ionicons name="trash-outline" size={20} color={palette.dangerText} />
-                  </TouchableOpacity>
+                        ]);
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: palette.panelAlt,
+                        borderWidth: 1,
+                        borderColor: palette.cardBorder,
+                        borderRadius: 14,
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        marginBottom: 10,
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Remover grupo</Text>
+                        <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>Excluir o grupo permanentemente.</Text>
+                      </View>
+                      <Ionicons name="trash-outline" size={20} color={palette.dangerText} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => void handleLeaveGroup()}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: palette.panelAlt,
+                        borderWidth: 1,
+                        borderColor: palette.cardBorder,
+                        borderRadius: 14,
+                        paddingHorizontal: 14,
+                        paddingVertical: 14,
+                        marginBottom: 10,
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Sair do grupo</Text>
+                        <Text style={{ color: palette.textMuted, fontSize: 12, marginTop: 2 }}>Remover sua participação neste grupo.</Text>
+                      </View>
+                      <Ionicons name="log-out-outline" size={20} color={palette.dangerText} />
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            </ScrollView>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
+              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
+                <View style={{ backgroundColor: palette.panel, borderBottomWidth: 1, borderBottomColor: palette.cardBorder, padding: 12 }}>
+                  <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 14 }}>Lista de membros</Text>
+                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{selectedGroup?.members.length || 0} participantes</Text>
                 </View>
-              ) : null}
-            </View>
-          </ScrollView>
+
+                <View style={{ backgroundColor: palette.panel, padding: 12 }}>
+                  {(selectedGroup?.members || []).map((member, idx, arr) => {
+                    const initials = (member.name || "").split(" ").map((s) => s.charAt(0)).slice(0, 2).join("").toUpperCase() || "U";
+
+                    return (
+                      <View key={member.id} style={{ paddingVertical: 10, borderBottomWidth: idx < arr.length - 1 ? 1 : 0, borderBottomColor: palette.cardBorder }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+                            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                              <Text style={{ color: palette.recycleAccent, fontWeight: "900" }}>{initials}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: palette.textPrimary, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>
+                                {member.name}
+                              </Text>
+                              <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{member.isOwner ? "Administrador" : "Membro"}</Text>
+                            </View>
+                          </View>
+                          <View style={{ marginLeft: 12 }}>
+                            {member.id === currentUserId ? <Text style={{ color: palette.textSecondary, fontWeight: "700" }}>Você</Text> : null}
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => void handleLeaveGroup()}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  backgroundColor: palette.dangerPanel,
+                  borderWidth: 1,
+                  borderColor: palette.dangerBorder,
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 14,
+                }}
+              >
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Sair do grupo</Text>
+                  <Text style={{ color: palette.textMuted, fontSize: 12, marginTop: 2 }}>Remover sua participação neste grupo.</Text>
+                </View>
+                <Ionicons name="log-out-outline" size={20} color={palette.dangerText} />
+              </TouchableOpacity>
+            </ScrollView>
+          )}
         </View>
       </Modal>
 

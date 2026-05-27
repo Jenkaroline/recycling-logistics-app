@@ -40,6 +40,15 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      match /competitionNotifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if signedIn()
+          && request.resource.data.recipientUid == userId
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.type == "member-removed";
+        allow update, delete: if isOwner(userId);
+      }
+
       match /competitionChatMessages/{docId} {
         allow read, write: if isOwner(userId);
       }
@@ -101,6 +110,14 @@ service cloud.firestore {
         allow update: if signedIn() && request.auth.uid == resource.data.authorId;
         allow delete: if signedIn() && (request.auth.uid == resource.data.authorId);
       }
+    }
+
+    // Public groups collection to store shared group metadata (image, name, owner)
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId && request.resource.data.ownerId is string;
+      // Only the recorded owner may update or delete the public group document
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     // Group notifications (contests / invalidations)

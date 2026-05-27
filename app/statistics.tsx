@@ -93,6 +93,7 @@ export default function StatisticsScreen() {
   const insets = useSafeAreaInsets();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
   const { entries } = usePlasticConsumption();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
@@ -420,7 +421,7 @@ export default function StatisticsScreen() {
         <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <TouchableOpacity
-            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            onPress={() => drawerNavigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
             style={{
               width: 44,
               height: 44,

@@ -54,6 +54,8 @@ function kindLabel(kind: AppNotificationItem["kind"]) {
       return "Chat";
     case "evidence":
       return "Evidência";
+    case "member-removed":
+      return "Remoção";
     default:
       return "Notificação";
   }
@@ -81,6 +83,11 @@ function getNotificationTone(item: AppNotificationItem, darkModeEnabled: boolean
       tint: darkModeEnabled ? "rgba(255, 139, 148, 0.12)" : "rgba(179, 49, 77, 0.08)",
       border: darkModeEnabled ? "rgba(255, 139, 148, 0.28)" : "rgba(179, 49, 77, 0.18)",
     },
+    "member-removed": {
+      accent: darkModeEnabled ? "#ff8b94" : "#b3314d",
+      tint: darkModeEnabled ? "rgba(255, 139, 148, 0.12)" : "rgba(179, 49, 77, 0.08)",
+      border: darkModeEnabled ? "rgba(255, 139, 148, 0.28)" : "rgba(179, 49, 77, 0.18)",
+    },
     default: {
       accent: darkModeEnabled ? "#c7d8ea" : "#5d748b",
       tint: darkModeEnabled ? "rgba(199, 216, 234, 0.10)" : "rgba(93, 116, 139, 0.08)",
@@ -92,6 +99,7 @@ function getNotificationTone(item: AppNotificationItem, darkModeEnabled: boolean
   if (item.kind === "invitation") return tones.invitation;
   if (item.kind === "invitation-response") return tones.response;
   if (item.kind === "evidence") return tones.evidence;
+  if (item.kind === "member-removed") return tones["member-removed"];
   return tones.default;
 }
 

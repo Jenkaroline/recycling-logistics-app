@@ -19,6 +19,7 @@ import React, {
     useMemo,
     useState,
 } from "react";
+import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../service/firebaseConfig";
 
 export type SocialUser = {
@@ -121,16 +122,27 @@ function toIsoDate(
 
 export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<SocialUser[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<SocialUser | null>(null);
   const [feedPosts, setFeedPosts] = useState<SocialPost[]>([]);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [followerEvents, setFollowerEvents] = useState<FollowerEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
-  const currentUid = auth.currentUser?.uid;
+  const currentUid = currentUser?.uid;
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
+      setCurrentUser(nextUser);
+    });
+
+    return unsubscribeAuth;
+  }, []);
 
   useEffect(() => {
     if (!currentUid) {
       setUsers([]);
+      setCurrentUserProfile(null);
       setFeedPosts([]);
       setFollowingIds(new Set());
       setFollowerEvents([]);
@@ -149,12 +161,36 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
           user?.displayName?.trim() || user?.email?.split("@")[0] || "Usuario",
         email: user?.email || "",
         emailLower: user?.email?.trim().toLowerCase() || "",
-        avatarUrl: user?.photoURL || "",
         createdAt: serverTimestamp(),
         followersCount: 0,
         followingCount: 0,
       },
       { merge: true },
+    );
+
+    const currentUserRef = doc(db, "users", currentUid);
+    const unsubscribeCurrentUser = onSnapshot(
+      currentUserRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setCurrentUserProfile(null);
+          return;
+        }
+
+        const data = snapshot.data() as Partial<SocialUser>;
+        setCurrentUserProfile({
+          uid: snapshot.id,
+          username: data.username || "Usuario",
+          email: data.email,
+          avatarUrl: data.avatarUrl,
+          bio: data.bio,
+          followersCount: Number(data.followersCount || 0),
+          followingCount: Number(data.followingCount || 0),
+        });
+      },
+      (error) => {
+        console.warn("Current user listener failed:", error);
+      },
     );
 
     const usersQuery = query(
@@ -351,6 +387,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => {
+      unsubscribeCurrentUser();
       unsubscribeUsers();
       unsubscribeFollowing();
       unsubscribeFollowers();
@@ -366,19 +403,20 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     return map;
   }, [users]);
 
-  const currentProfile = currentUid ? usersById.get(currentUid) || null : null;
+  const currentProfileFromList = currentUid ? usersById.get(currentUid) || null : null;
+  const currentProfile = currentUserProfile || currentProfileFromList;
 
   const enrichedPosts = useMemo(
     () =>
       feedPosts.map((post) => {
-        const author = usersById.get(post.authorId);
+        const author = post.authorId === currentUid ? currentProfile : usersById.get(post.authorId);
         return {
           ...post,
           authorName: author?.username || "Usuario",
           authorAvatar: author?.avatarUrl,
         };
       }),
-    [feedPosts, usersById],
+    [feedPosts, usersById, currentUid, currentProfile],
   );
 
   const myPosts = useMemo(
@@ -592,6 +630,12 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    console.info("[social][profile-photo] saving to firestore", {
+      uid: currentUid,
+      hasAvatarUrl: Boolean(avatarUrl),
+      avatarUrlLength: avatarUrl.length,
+    });
+
     await setDoc(
       doc(db, "users", currentUid),
       {
@@ -599,6 +643,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       },
       { merge: true },
     );
+
+    console.info("[social][profile-photo] saved to firestore", {
+      uid: currentUid,
+    });
   };
 
   return (

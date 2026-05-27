@@ -11,7 +11,6 @@ import {
   updatePassword,
   updateProfile,
 } from "firebase/auth";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { setDoc, doc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -30,7 +29,7 @@ import {
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { auth, storage, db } from "../service/firebaseConfig";
+import { auth, db } from "../service/firebaseConfig";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
@@ -112,31 +111,13 @@ function trendMessage(tone: ReturnType<typeof trendTone>) {
   return "Ritmo estável. Sem drama, sem susto, sem novela.";
 }
 
-function fileUriToBlob(uri: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 400) {
-        resolve(xhr.response as Blob);
-        return;
-      }
-      reject(new Error(`Falha ao carregar arquivo local (${xhr.status}).`));
-    };
-    xhr.onerror = () =>
-      reject(new Error("Não foi possível ler o arquivo local da imagem."));
-    xhr.responseType = "blob";
-    xhr.open("GET", uri, true);
-    xhr.send();
-  });
-}
-
 export default function SettingsScreen() {
   const { entries, totalGrams } = usePlasticConsumption();
   const { currentProfile, myPosts, updateProfilePhoto } = useSocial();
   const { darkModeEnabled, setDarkModeEnabled } = useThemePreference();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const drawerNavigation = navigation.getParent?.();
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation.getParent?.();
   const drawerOpen = false;
   const palette = darkModeEnabled
     ? {
@@ -218,10 +199,15 @@ export default function SettingsScreen() {
   const [settingsOption, setSettingsOption] = useState<"email" | "username" | "password" | null>(null);
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
   const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
 
   const stripSpaces = (value: string) => value.replace(/\s+/g, "");
 
   const sanitizePassword = (s: string) => s || "";
+
+  useEffect(() => {
+    setAvatarPreviewUrl(currentProfile?.avatarUrl || "");
+  }, [currentProfile?.avatarUrl]);
 
   const isStrongPassword = (s: string) => {
     return /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
@@ -372,7 +358,7 @@ export default function SettingsScreen() {
   }, [statsRange]);
 
   const user = auth.currentUser;
-  const avatarUrl = currentProfile?.avatarUrl || user?.photoURL || "";
+  const avatarUrl = avatarPreviewUrl || currentProfile?.avatarUrl || "";
   const fullName =
     currentProfile?.username ||
     user?.displayName ||
@@ -652,8 +638,20 @@ export default function SettingsScreen() {
   const handlePickProfilePhoto = async () => {
     if (!user) return;
 
+    console.info("[settings][photo] start", {
+      uid: user.uid,
+      hasPhotoURL: Boolean(user.photoURL),
+      hasProfilePhoto: Boolean(currentProfile?.avatarUrl),
+    });
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    console.info("[settings][photo] permission", {
+      granted: permission.granted,
+      canAskAgain: permission.canAskAgain,
+      status: permission.status,
+    });
     if (!permission.granted) {
+      console.warn("[settings][photo] permission denied");
       Alert.alert(
         "Permissão",
         "Permita acesso às fotos para atualizar o perfil.",
@@ -665,35 +663,68 @@ export default function SettingsScreen() {
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.75,
+      quality: 0.35,
+      base64: true,
     });
 
-    if (result.canceled || !result.assets?.[0]?.uri) return;
+    console.info("[settings][photo] picker result", {
+      canceled: result.canceled,
+      assetCount: result.assets?.length || 0,
+      firstAsset: result.assets?.[0]
+        ? {
+            uri: result.assets[0].uri,
+            mimeType: result.assets[0].mimeType,
+            width: result.assets[0].width,
+            height: result.assets[0].height,
+          }
+        : null,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      console.info("[settings][photo] picker cancelled or without uri");
+      return;
+    }
 
     setUploadingPhoto(true);
     try {
       const selectedAsset = result.assets[0];
       const contentType = selectedAsset.mimeType || "image/jpeg";
       const extension = contentType.includes("png") ? "png" : "jpg";
+      const base64Data = selectedAsset.base64;
 
-      let blob: Blob;
-      try {
-        const response = await fetch(selectedAsset.uri);
-        blob = await response.blob();
-      } catch {
-        blob = await fileUriToBlob(selectedAsset.uri);
+      console.info("[settings][photo] selected asset", {
+        uri: selectedAsset.uri,
+        contentType,
+        extension,
+        hasBase64: Boolean(base64Data),
+      });
+
+      if (!base64Data) {
+        throw new Error("A imagem selecionada não veio com base64.");
       }
 
-      const photoRef = ref(
-        storage,
-        `avatars/${user.uid}/profile-${Date.now()}.${extension}`,
-      );
-      await uploadBytes(photoRef, blob, { contentType });
-      const downloadUrl = await getDownloadURL(photoRef);
-      await updateProfile(user, { photoURL: downloadUrl });
-      await updateProfilePhoto(downloadUrl);
+      const avatarDataUrl = `data:${contentType};base64,${base64Data}`;
+      console.info("[settings][photo] data url ready", {
+        dataUrlLength: avatarDataUrl.length,
+      });
+
+      if (avatarDataUrl.length > 900000) {
+        throw new Error("A imagem ficou grande demais para salvar no Firestore. Tente uma foto menor.");
+      }
+
+      setAvatarPreviewUrl(avatarDataUrl);
+      await updateProfilePhoto(avatarDataUrl);
+      console.info("[settings][photo] firestore profile updated");
       Alert.alert("Ok", "Foto de perfil atualizada.");
     } catch (error: any) {
+      console.error("[settings][photo] failed", {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack,
+        customData: error?.customData,
+        serverResponse: error?.customData?.serverResponse || error?.serverResponse,
+      });
       const serverPayload =
         error?.customData?.serverResponse || error?.serverResponse || "";
 

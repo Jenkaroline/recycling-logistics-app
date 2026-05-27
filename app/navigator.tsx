@@ -237,6 +237,7 @@ function AppDrawer() {
 
   return (
     <Drawer.Navigator
+      id="MainDrawer"
       initialRouteName="Home"
       screenOptions={{
         headerShown: false,

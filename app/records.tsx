@@ -42,6 +42,7 @@ export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingAmount, setEditingAmount] = useState("");
@@ -287,7 +288,7 @@ export default function RecordsScreen() {
         <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <TouchableOpacity
-              onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+              onPress={() => drawerNavigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
               style={{
                 width: 44,
                 height: 44,
