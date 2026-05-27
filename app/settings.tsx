@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import {
   deleteUser,
@@ -37,8 +36,6 @@ import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
-
-const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
 
 type ActivePanel = "none" | "settings" | "statistics";
 type DashboardRange = "week" | "month" | "year";
@@ -743,7 +740,6 @@ export default function SettingsScreen() {
         url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
         handleCodeInApp: true,
       });
-      await AsyncStorage.setItem(PENDING_EMAIL_CHANGE_KEY, trimmedEmail);
       console.info("[settings][email-change] verification sent", {
         uid: activeUser.uid,
         nextEmail: trimmedEmail,
@@ -778,7 +774,6 @@ export default function SettingsScreen() {
         setCurrentPassword("");
         setSettingsOption(null);
         setActivePanel("none");
-        await AsyncStorage.setItem(PENDING_EMAIL_CHANGE_KEY, trimmedEmail);
         navigation.reset({
           index: 0,
           routes: [

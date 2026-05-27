@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { deleteUser, reload, sendEmailVerification, verifyBeforeUpdateEmail } from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useRef, useState } from "react";
 // using Ionicons for the hero icon instead of the app logo
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
@@ -14,8 +13,6 @@ import { useThemePreference } from "../../src/ThemePreferenceContext";
 import ErrorMessage from "../components/ErrorMessage";
 import SuccessMessage from "../components/SuccessMessage";
 import WavesBackground from "../components/WavesBackground";
-
-const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
 
 type RootStackParamList = {
   Login: undefined;
@@ -142,9 +139,6 @@ export default function VerifyEmailScreen() {
         const refreshedUser = auth.currentUser ?? currentUser;
         const emailMatchesPending = verificationFlow !== "email-change" || !pendingEmail || refreshedUser.email === pendingEmail;
         if (refreshedUser.emailVerified && emailMatchesPending) {
-          if (verificationFlow === "email-change") {
-            await AsyncStorage.removeItem(PENDING_EMAIL_CHANGE_KEY);
-          }
           navigation.reset({ index: 0, routes: [{ name: "Main" }] });
         } else {
           setError(

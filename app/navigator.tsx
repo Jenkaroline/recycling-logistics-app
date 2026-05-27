@@ -6,7 +6,6 @@ import {
 } from "@react-navigation/drawer";
 import { DrawerActions } from "@react-navigation/native";
 import { onAuthStateChanged, reload } from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSocial } from "../src/SocialContext";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { Image } from "react-native";
@@ -41,9 +40,6 @@ import RecordsScreen from "./records";
 import NotificationsScreen from "../src/NotificationsScreen";
 import SettingsScreen from "./settings";
 import StatisticsScreen from "./statistics";
-
-const PENDING_EMAIL_CHANGE_KEY = "pending-email-change";
-
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
 
@@ -301,21 +297,7 @@ function AppDrawer() {
 
 function AppGate() {
   const [currentUser, setCurrentUser] = React.useState(auth.currentUser);
-  const [pendingEmailChange, setPendingEmailChange] = React.useState<string | null>(null);
   const [authReady, setAuthReady] = React.useState(false);
-
-  React.useEffect(() => {
-    let mounted = true;
-    void AsyncStorage.getItem(PENDING_EMAIL_CHANGE_KEY).then((value) => {
-      if (mounted) {
-        setPendingEmailChange(value || null);
-      }
-    });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   React.useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -340,16 +322,14 @@ function AppGate() {
   }
 
   const initialRouteName = currentUser?.emailVerified
-    ? pendingEmailChange
-      ? "VerifyEmail"
-      : "Main"
+    ? "Main"
     : currentUser
       ? "VerifyEmail"
       : "Login";
 
   return (
     <Stack.Navigator
-      key={currentUser ? (currentUser.emailVerified && !pendingEmailChange ? "main" : "verify") : "auth"}
+      key={currentUser ? (currentUser.emailVerified ? "main" : "verify") : "auth"}
       screenOptions={{ headerShown: false }}
       initialRouteName={initialRouteName}
     >
