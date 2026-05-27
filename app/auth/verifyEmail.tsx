@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { deleteUser, reload, sendEmailVerification, verifyBeforeUpdateEmail } from "firebase/auth";
+import { deleteUser, reload, sendEmailVerification, signOut, verifyBeforeUpdateEmail } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 // using Ionicons for the hero icon instead of the app logo
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
@@ -134,6 +134,23 @@ export default function VerifyEmailScreen() {
     setError("");
     try {
       const currentUser = auth.currentUser;
+      if (verificationFlow === "email-change") {
+        if (currentUser) {
+          try {
+            await reload(currentUser);
+          } catch (reloadError) {
+            console.warn("[verify-email][email-change] reload failed", reloadError);
+          }
+          try {
+            await signOut(auth);
+          } catch (signOutError) {
+            console.warn("[verify-email][email-change] signOut failed", signOutError);
+          }
+        }
+        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+        return;
+      }
+
       if (currentUser) {
         await reload(currentUser);
         const refreshedUser = auth.currentUser ?? currentUser;
@@ -142,11 +159,11 @@ export default function VerifyEmailScreen() {
           navigation.reset({ index: 0, routes: [{ name: "Main" }] });
         } else {
           setError(
-            verificationFlow === "email-change"
-              ? "A troca de e-mail ainda não foi concluída. Confirme no link e tente novamente."
-              : "E-mail ainda não verificado. Se você acabou de confirmar no link, aguarde alguns segundos e tente novamente.",
+            "E-mail ainda não verificado. Se você acabou de confirmar no link, aguarde alguns segundos e tente novamente.",
           );
         }
+      } else {
+        setError("Usuário não autenticado. Faça login novamente.");
       }
     } catch (e: any) {
       setError(translateFirebaseError(e));

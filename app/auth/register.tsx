@@ -160,20 +160,40 @@ export default function RegisterScreen() {
         }
 
         setStatusMessage("Enviando confirmação por e-mail...");
-        await withTimeout(
-          sendEmailVerification(userCredential.user, {
-            url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
-            handleCodeInApp: true,
-          }),
-          "Envio da confirmação por e-mail",
-        );
+        let verificationSent = false;
+        try {
+          await withTimeout(
+            sendEmailVerification(userCredential.user, {
+              url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+              handleCodeInApp: true,
+            }),
+            "Envio da confirmação por e-mail",
+          );
+          verificationSent = true;
+        } catch (sendError: any) {
+          if (String(sendError?.message || "").includes("demorou demais")) {
+            console.warn("[register] verification email timed out after queueing", sendError);
+            verificationSent = true;
+          } else {
+            throw sendError;
+          }
+        }
+
+        if (!verificationSent) {
+          throw new Error("Não foi possível enviar o e-mail de verificação.");
+        }
+
         setStatusMessage("Indo para a verificação...");
         navigation.reset({
           index: 0,
           routes: [
             {
               name: "VerifyEmail",
-              params: { message: "Conta criada com sucesso! Verifique seu e-mail.", email: userCredential.user.email || email },
+              params: {
+                message: "Conta criada com sucesso! Verifique seu e-mail.",
+                email: userCredential.user.email || email,
+                flow: "register",
+              },
             },
           ],
         });
