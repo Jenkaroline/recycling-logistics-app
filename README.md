@@ -20,10 +20,10 @@ O projeto também está alinhado ao Objetivo de Desenvolvimento Sustentável 14 
 
 ## Tecnologias
 
-- React Native
-- Expo
-- Autenticação Firebase
-- React Native Paper
+- React Native;
+- Expo;
+- Autenticação Firebase;
+- React Native Paper.
 
 ## Status do Projeto
 
