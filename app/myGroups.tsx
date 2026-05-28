@@ -30,6 +30,9 @@ type GroupEvidenceEntry = {
   xpEarned?: number;
   notes?: string | null;
   photoUrl?: string | null;
+  locationLabel?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   contestCount?: number;
   contestPenaltyApplied?: boolean;
   contestPenaltyAppliedAt?: string | null;
@@ -118,7 +121,6 @@ export default function MyGroupsScreen() {
   const { types: recyclingTypes } = useRecyclingTypes();
   const {
     groups,
-    rankedMembers,
     chatMessages,
     createGroup,
     setActiveGroup,
@@ -352,11 +354,48 @@ export default function MyGroupsScreen() {
 
   const groupMembers = useMemo(() => {
     if (!selectedGroup) return [];
-    return [...(selectedGroup.members || [])].sort((a, b) => {
+    const memberMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        totalXp: number;
+        actionsCount: number;
+        isOwner: boolean;
+      }
+    >();
+
+    (selectedGroup.members || []).forEach((member) => {
+      memberMap.set(member.id, {
+        id: member.id,
+        name: member.name,
+        totalXp: 0,
+        actionsCount: 0,
+        isOwner: Boolean(member.isOwner),
+      });
+    });
+
+    groupEvidenceEntries.forEach((entry) => {
+      const authorId = entry.authorId || entry.authorName || `entry-${entry.id}`;
+      const current = memberMap.get(authorId) || {
+        id: authorId,
+        name: entry.authorName || "Membro",
+        totalXp: 0,
+        actionsCount: 0,
+        isOwner: false,
+      };
+
+      current.name = current.name || entry.authorName || "Membro";
+      current.totalXp += Number(entry.xpEarned || 0);
+      current.actionsCount += 1;
+      memberMap.set(authorId, current);
+    });
+
+    return [...memberMap.values()].sort((a, b) => {
       if (b.totalXp !== a.totalXp) return b.totalXp - a.totalXp;
       return a.name.localeCompare(b.name, "pt-BR");
     });
-  }, [rankedMembers, selectedGroup]);
+  }, [groupEvidenceEntries, selectedGroup]);
 
   const groupFeed = useMemo(() => {
     if (!selectedGroup) return [];
@@ -420,14 +459,18 @@ export default function MyGroupsScreen() {
   const handleCreateGroup = async () => {
     if (!groupName.trim()) return;
     const durationDays = Number.parseInt(groupDurationDays, 10);
-    await createGroup({
-      name: groupName.trim(),
-      description: groupDescription.trim(),
-      durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 7,
-      imageUrl: groupImageUrl,
-    });
-    resetCreateForm();
-    setCreateVisible(false);
+    try {
+      await createGroup({
+        name: groupName.trim(),
+        description: groupDescription.trim(),
+        durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 7,
+        imageUrl: groupImageUrl,
+      });
+      resetCreateForm();
+      setCreateVisible(false);
+    } catch (error) {
+      Alert.alert("Falha ao criar grupo", "Não foi possível criar o grupo agora. Tente novamente em instantes.");
+    }
   };
 
   const openGroup = async (groupId: string) => {
@@ -462,9 +505,13 @@ export default function MyGroupsScreen() {
       return;
     }
 
-    setSelectedGroupId(groupId);
-    setSelectedTab("stats");
-    await setActiveGroup(groupId);
+    try {
+      setSelectedGroupId(groupId);
+      setSelectedTab("stats");
+      await setActiveGroup(groupId);
+    } catch (error) {
+      Alert.alert("Falha ao abrir grupo", "Não foi possível abrir o grupo agora. Tente novamente em instantes.");
+    }
   };
 
   const openManageGroup = () => {
@@ -504,17 +551,21 @@ export default function MyGroupsScreen() {
       return;
     }
 
-    await updateGroupDetails(selectedGroup.id, {
-      name: nextName || selectedGroup.name,
-      description: nextDescription,
-      imageUrl: nextImageUrl,
-    });
-    setManageGroupName(nextName);
-    setManageGroupDescription(nextDescription);
-    setManageGroupImageUrl(nextImageUrl);
-    setManageAction(null);
-    setManageMenuVisible(false);
-    Alert.alert("Grupo atualizado", "As informações do grupo foram salvas.");
+    try {
+      await updateGroupDetails(selectedGroup.id, {
+        name: nextName || selectedGroup.name,
+        description: nextDescription,
+        imageUrl: nextImageUrl,
+      });
+      setManageGroupName(nextName);
+      setManageGroupDescription(nextDescription);
+      setManageGroupImageUrl(nextImageUrl);
+      setManageAction(null);
+      setManageMenuVisible(false);
+      Alert.alert("Grupo atualizado", "As informações do grupo foram salvas.");
+    } catch (error) {
+      Alert.alert("Falha ao atualizar grupo", "Não foi possível salvar as alterações agora. Tente novamente em instantes.");
+    }
   };
 
   const handleAddMember = async () => {
@@ -575,12 +626,12 @@ export default function MyGroupsScreen() {
       }
 
       if (errorCode === "not-found" || errorMessage === "not-found") {
-        Alert.alert("Usuário não cadastrado", `O e-mail ${inputEmail} não está cadastrado no app.`);
+        Alert.alert("Pessoa não cadastrada", "Não encontramos essa pessoa no app. Peça para ela se cadastrar e tente novamente.");
         return;
       }
 
       if (errorCode === "lookup-failed") {
-        Alert.alert("Falha na validação", "Não foi possível validar o e-mail agora. Verifique sua conexão e tente novamente.");
+        Alert.alert("Não foi possível validar", "Não conseguimos confirmar esse e-mail agora. Verifique sua conexão e tente novamente.");
         return;
       }
 
@@ -595,7 +646,7 @@ export default function MyGroupsScreen() {
         errorCode: errorCode || "unknown",
       });
 
-      Alert.alert("Falha inesperada", translateFirebaseError(error));
+      Alert.alert("Falha ao enviar convite", "Não foi possível enviar o convite agora. Tente novamente em instantes.");
     }
   };
 
@@ -658,17 +709,21 @@ export default function MyGroupsScreen() {
     const photoUrl = await captureRecyclingEvidencePhoto();
     if (!photoUrl) return;
 
-    const currentUser = auth.currentUser;
-    await addRecyclingAction({
-      type: item.type,
-      typeId: item.id,
-      groupId: selectedGroup.id,
-      photoUrl,
-      authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
-      xpEarned: item.xp,
-    });
-    await awardXpToActiveGroup(item.xp);
-    navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
+    try {
+      const currentUser = auth.currentUser;
+      await addRecyclingAction({
+        type: item.type,
+        typeId: item.id,
+        groupId: selectedGroup.id,
+        photoUrl,
+        authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
+        xpEarned: item.xp,
+      });
+      await awardXpToActiveGroup(item.xp);
+      navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
+    } catch (error) {
+      Alert.alert("Falha ao registrar evidência", translateFirebaseError(error));
+    }
   };
 
   const openContestModal = (entry: GroupEvidenceEntry) => {
@@ -779,8 +834,12 @@ export default function MyGroupsScreen() {
 
   const sendMessage = async () => {
     if (!messageText.trim()) return;
-    await addChatMessage(messageText.trim());
-    setMessageText("");
+    try {
+      await addChatMessage(messageText.trim());
+      setMessageText("");
+    } catch (error) {
+      Alert.alert("Falha ao enviar mensagem", translateFirebaseError(error));
+    }
   };
 
   const renderGroupList = () => (
@@ -880,7 +939,7 @@ export default function MyGroupsScreen() {
             <Text style={{ color: palette.textPrimary, fontSize: 24, fontWeight: "900", marginTop: 2 }} numberOfLines={1}>
               {selectedGroup.name}
             </Text>
-            {(selectedGroup.members || []).some((m) => m.id === currentUserId) && selectedGroup.ownerId !== currentUserId ? (
+            {groupMembers.some((m) => m.id === currentUserId) && selectedGroup.ownerId !== currentUserId ? (
               <Text style={{ color: palette.textMuted, fontSize: 12, marginTop: 4 }}>Você participa deste grupo</Text>
             ) : null}
 
@@ -1031,6 +1090,15 @@ export default function MyGroupsScreen() {
                     ) : null}
 
                     <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+                      {entry.locationLabel || (typeof entry.latitude === "number" && typeof entry.longitude === "number") ? (
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 12 }}>
+                          <Ionicons name="location-outline" size={16} color={palette.recycleAccent} />
+                          <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 19, flex: 1 }}>
+                            {entry.locationLabel || `${entry.latitude?.toFixed(6)}, ${entry.longitude?.toFixed(6)}`}
+                          </Text>
+                        </View>
+                      ) : null}
+
                       <View style={{ backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 12 }}>
                         {entry.notes ? (
                           <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 19 }}>{entry.notes}</Text>
@@ -1621,14 +1689,14 @@ export default function MyGroupsScreen() {
                 >
                   <View style={{ flex: 1, paddingRight: 12 }}>
                     <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Membros</Text>
-                    <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{selectedGroup?.members.length || 0} participantes</Text>
+                    <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{groupMembers.length} participantes</Text>
                   </View>
                   <Ionicons name={manageAction === "members" ? "chevron-up" : "people-outline"} size={20} color={palette.textSecondary} />
                 </TouchableOpacity>
 
                 {manageAction === "members" ? (
                   <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 12 }}>
-                    {(selectedGroup?.members || []).map((member, idx, arr) => {
+                    {groupMembers.map((member, idx, arr) => {
                       const initials = (member.name || "").split(" ").map((s) => s.charAt(0)).slice(0, 2).join("").toUpperCase() || "U";
                       return (
                         <View key={member.id} style={{ paddingVertical: 10, borderBottomWidth: idx < arr.length - 1 ? 1 : 0, borderBottomColor: palette.cardBorder }}>
@@ -1685,11 +1753,15 @@ export default function MyGroupsScreen() {
                               style: "destructive",
                               onPress: async () => {
                                 if (!selectedGroup?.id) return;
-                                await deactivateGroup(selectedGroup.id);
-                                setSelectedGroupId(null);
-                                setManageAction(null);
-                                setManageMenuVisible(false);
-                                Alert.alert("Grupo desativado", "O grupo foi removido da lista ativa.");
+                                try {
+                                  await deactivateGroup(selectedGroup.id);
+                                  setSelectedGroupId(null);
+                                  setManageAction(null);
+                                  setManageMenuVisible(false);
+                                  Alert.alert("Grupo desativado", "O grupo foi removido da lista ativa.");
+                                } catch (error) {
+                                    Alert.alert("Falha ao desativar grupo", "Não foi possível desativar o grupo agora. Tente novamente em instantes.");
+                                }
                               },
                             },
                           ]);
@@ -1702,11 +1774,15 @@ export default function MyGroupsScreen() {
                             text: "Ativar",
                             onPress: async () => {
                               if (!selectedGroup?.id) return;
-                              await activateGroup(selectedGroup.id);
-                              await setActiveGroup(selectedGroup.id);
-                              setManageAction(null);
-                              setManageMenuVisible(false);
-                              Alert.alert("Grupo reativado", "Agora você já pode entrar no grupo.");
+                              try {
+                                await activateGroup(selectedGroup.id);
+                                await setActiveGroup(selectedGroup.id);
+                                setManageAction(null);
+                                setManageMenuVisible(false);
+                                Alert.alert("Grupo reativado", "Agora você já pode entrar no grupo.");
+                              } catch (error) {
+                                Alert.alert("Falha ao ativar grupo", "Não foi possível reativar o grupo agora. Tente novamente em instantes.");
+                              }
                             },
                           },
                         ]);
@@ -1747,11 +1823,15 @@ export default function MyGroupsScreen() {
                             text: "Excluir",
                             style: "destructive",
                             onPress: async () => {
-                              await deleteGroup(selectedGroup?.id || "");
-                              setSelectedGroupId(null);
-                              setManageAction(null);
-                              setManageMenuVisible(false);
-                              Alert.alert("Grupo excluído", "O grupo foi removido com sucesso.");
+                              try {
+                                await deleteGroup(selectedGroup?.id || "");
+                                setSelectedGroupId(null);
+                                setManageAction(null);
+                                setManageMenuVisible(false);
+                                Alert.alert("Grupo excluído", "O grupo foi removido com sucesso.");
+                              } catch (error) {
+                                Alert.alert("Falha ao excluir grupo", "Não foi possível excluir o grupo agora. Tente novamente em instantes.");
+                              }
                             },
                           },
                         ]);
@@ -1805,11 +1885,11 @@ export default function MyGroupsScreen() {
               <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
                 <View style={{ backgroundColor: palette.panel, borderBottomWidth: 1, borderBottomColor: palette.cardBorder, padding: 12 }}>
                   <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 14 }}>Lista de membros</Text>
-                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{selectedGroup?.members.length || 0} participantes</Text>
+                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 2 }}>{groupMembers.length} participantes</Text>
                 </View>
 
                 <View style={{ backgroundColor: palette.panel, padding: 12 }}>
-                  {(selectedGroup?.members || []).map((member, idx, arr) => {
+                  {groupMembers.map((member, idx, arr) => {
                     const initials = (member.name || "").split(" ").map((s) => s.charAt(0)).slice(0, 2).join("").toUpperCase() || "U";
 
                     return (

@@ -12,7 +12,7 @@ import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
-import { captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
+import { captureRecyclingEvidenceLocation, captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { useAppNotifications } from "../src/useAppNotifications";
 import { toLocalDayKey, useCurrentDayKey } from "../src/useCurrentDayKey";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ import { auth } from "../service/firebaseConfig";
 type QuickActionsProps = {
   onPressHistory: () => void;
   onPressPlus: () => void;
+  onPressStats?: () => void;
   onPressPrevGroup?: () => void;
   onPressNextGroup?: () => void;
   onPressAllGroups?: () => void;
@@ -29,6 +30,7 @@ type QuickActionsProps = {
   canGoNext?: boolean;
   historyColor: string;
   plusColor: string;
+  statsColor?: string;
   borderColor: string;
   backgroundColor: string;
 };
@@ -36,6 +38,7 @@ type QuickActionsProps = {
 function QuickActions({
   onPressHistory,
   onPressPlus,
+  onPressStats,
   onPressPrevGroup,
   onPressNextGroup,
   onPressAllGroups,
@@ -44,6 +47,7 @@ function QuickActions({
   canGoNext,
   historyColor,
   plusColor,
+  statsColor,
   borderColor,
   backgroundColor,
 }: QuickActionsProps) {
@@ -80,6 +84,21 @@ function QuickActions({
         }}
       >
         <MaterialCommunityIcons name="plus" size={18} color={plusColor} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={onPressStats}
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 10,
+          borderWidth: 0,
+          borderColor: "transparent",
+          backgroundColor: "transparent",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name="stats-chart-outline" size={18} color={statsColor ?? historyColor} />
       </TouchableOpacity>
       
 
@@ -426,6 +445,9 @@ const ICON_OPTIONS = [
   const handleAddRecyclingType = async (item: { id: string; type: string; xp: number }) => {
     if (!activeGroupId) return;
 
+    const location = await captureRecyclingEvidenceLocation();
+    if (!location) return;
+
     const photoUrl = await captureRecyclingEvidencePhoto();
     if (!photoUrl) return;
 
@@ -436,6 +458,9 @@ const ICON_OPTIONS = [
       xpEarned: item.xp,
       groupId: activeGroupId,
       photoUrl,
+      locationLabel: location.locationLabel,
+      latitude: location.latitude,
+      longitude: location.longitude,
       authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
     });
     await awardXpToActiveGroup(item.xp);
@@ -713,12 +738,15 @@ const ICON_OPTIONS = [
           <QuickActions
             onPressHistory={() => (navigation as any).navigate("Registros")}
             onPressPlus={() => setModalVisible(true)}
+            onPressStats={() => (navigation as any).navigate("Estatísticas")}
             showGroupControls={false}
             historyColor={inGoal ? palette.recycleAccent : palette.danger}
             plusColor={inGoal ? palette.recycleAccent : palette.danger}
+            statsColor={inGoal ? palette.recycleAccent : palette.danger}
             borderColor={inGoal ? "transparent" : "transparent"}
             backgroundColor={inGoal ? "transparent" : "transparent"}
           />
+          
           <TouchableOpacity
           onPress={() => {
             if (hasEntryToday) {

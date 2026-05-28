@@ -151,6 +151,15 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           style={{ borderRadius: 10, marginBottom: 6 }}
           icon={({ color, size }) => <Ionicons name="map-outline" size={size} color={color || palette.iconInactive} />}
         />
+        <DrawerItem
+          label="Estatísticas"
+          onPress={() => (props.navigation as any).navigate("Estatísticas")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="stats-chart-outline" size={size} color={color || palette.iconInactive} />}
+        />
       </View>
 
       <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: palette.header, paddingTop: 8, paddingHorizontal: 8 }}>
@@ -172,16 +181,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
           style={{ borderRadius: 10, marginBottom: 6 }}
           icon={({ color, size }) => <Ionicons name="notifications-outline" size={size} color={color || palette.iconInactive} />}
-        />
-
-        <DrawerItem
-          label="Configurações"
-          onPress={() => openSettings({ section: undefined })}
-          activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.iconInactive}
-          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
-          style={{ borderRadius: 10, marginBottom: 6 }}
-          icon={({ color, size }) => <Ionicons name="settings-outline" size={size} color={color || palette.iconInactive} />}
         />
 
         <DrawerItem
@@ -322,28 +321,48 @@ function AppGate() {
     return null;
   }
 
-  const initialRouteName = currentUser?.emailVerified
-    ? "Main"
-    : currentUser
-      ? "VerifyEmail"
-      : "Login";
+  const isAuthenticated = Boolean(currentUser);
+  const isVerified = Boolean(currentUser?.emailVerified);
+
+  if (!isAuthenticated) {
+    return (
+      <Stack.Navigator key="auth" screenOptions={{ headerShown: false }} initialRouteName="Login">
+        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+        <Stack.Screen
+          name="ResetPasswordConfirm"
+          component={ResetPasswordConfirmScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      </Stack.Navigator>
+    );
+  }
+
+  if (!isVerified) {
+    return (
+      <Stack.Navigator key="verify" screenOptions={{ headerShown: false }} initialRouteName="VerifyEmail">
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+      </Stack.Navigator>
+    );
+  }
 
   return (
-    <Stack.Navigator
-      key={currentUser ? (currentUser.emailVerified ? "main" : "verify") : "auth"}
-      screenOptions={{ headerShown: false }}
-      initialRouteName={initialRouteName}
-    >
+    <Stack.Navigator key="main" screenOptions={{ headerShown: false }} initialRouteName="Main">
+      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="ResetPasswordConfirm"
         component={ResetPasswordConfirmScreen}
         options={{ headerShown: false }}
       />
-      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

@@ -7,6 +7,7 @@ import {
   deleteUser,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  signOut,
   verifyBeforeUpdateEmail,
   updatePassword,
   updateProfile,
@@ -926,6 +927,15 @@ export default function SettingsScreen() {
                       const activeUser = auth.currentUser;
                       if (!activeUser) return;
                       await deleteUser(activeUser);
+                      try {
+                        await signOut(auth);
+                      } catch {
+                        // The session may already be invalidated after deleteUser.
+                      }
+                      navigation.reset({
+                        index: 0,
+                        routes: [{ name: "Login" }],
+                      });
                       Alert.alert(
                         "Conta excluída",
                         "Sua conta foi removida com sucesso.",

@@ -9,16 +9,42 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function editCount(data) {
+      return data.editCount is int ? data.editCount : 0;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update, delete: if isOwner(userId);
 
       match /recyclingActions/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.editCount == 0;
+        allow update: if isOwner(userId)
+          && editCount(resource.data) < 3
+          && request.resource.data.editCount == editCount(resource.data) + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "type",
+            "notes",
+            "editCount",
+            "updatedAt"
+          ]);
+        allow delete: if isOwner(userId);
       }
 
       match /plasticConsumptionEntries/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.editCount == 0;
+        allow update: if isOwner(userId)
+          && editCount(resource.data) < 3
+          && request.resource.data.editCount == editCount(resource.data) + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "amountGrams",
+            "categoryName",
+            "editCount",
+            "updatedAt"
+          ]);
+        allow delete: if isOwner(userId);
       }
 
       match /plasticConsumptionMeta/{docId} {
@@ -118,6 +144,12 @@ service cloud.firestore {
       allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId && request.resource.data.ownerId is string;
       // Only the recorded owner may update or delete the public group document
       allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /history/{historyId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.actorId == request.auth.uid;
+        allow update, delete: if false;
+      }
     }
 
     // Group notifications (contests / invalidations)

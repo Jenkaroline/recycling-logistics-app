@@ -1,19 +1,20 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
 } from "firebase/firestore";
 import { auth, db } from "../service/firebaseConfig";
 import { recordAuditEvent } from "./auditLogger";
+
+const MAX_EDIT_COUNT = 3;
 
 type RecyclingAction = {
   id: string;
@@ -28,7 +29,11 @@ type RecyclingAction = {
   contestCount?: number;
   contestPenaltyApplied?: boolean;
   contestPenaltyAppliedAt?: string | null;
+  locationLabel?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   createdAt: string;
+  editCount?: number;
 };
 
 type AddActionInput =
@@ -45,6 +50,9 @@ type AddActionInput =
       contestCount?: number;
       contestPenaltyApplied?: boolean;
       contestPenaltyAppliedAt?: string | null;
+      locationLabel?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     };
 
 type RecyclingContextValue = {
@@ -67,6 +75,7 @@ function normalizeAction(entry: RecyclingAction & { createdAt?: unknown }): Recy
   return {
     ...entry,
     xpEarned: Number(entry.xpEarned || 0),
+    editCount: Number(entry.editCount || 0),
     createdAt:
       typeof createdAt === "string"
         ? createdAt
@@ -157,6 +166,10 @@ export function RecyclingProvider({ children }: { children: React.ReactNode }) {
       contestCount: Number(payload.contestCount || 0),
       contestPenaltyApplied: Boolean(payload.contestPenaltyApplied),
       contestPenaltyAppliedAt: payload.contestPenaltyAppliedAt || null,
+      locationLabel: payload.locationLabel || null,
+      latitude: typeof payload.latitude === "number" ? payload.latitude : null,
+      longitude: typeof payload.longitude === "number" ? payload.longitude : null,
+      editCount: 0,
       createdAt: serverTimestamp(),
     };
 
@@ -183,15 +196,33 @@ export function RecyclingProvider({ children }: { children: React.ReactNode }) {
     const uid = currentUidRef.current;
     if (!uid) return;
 
-    await updateDoc(doc(db, "users", uid, "recyclingActions", id), {
-      type: payload.type,
-      notes: payload.notes || null,
+    const actionRef = doc(db, "users", uid, "recyclingActions", id);
+
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(actionRef);
+      if (!snapshot.exists()) {
+        throw new Error("not-found");
+      }
+
+      const currentEditCount = Number(snapshot.data().editCount || 0);
+      if (currentEditCount >= MAX_EDIT_COUNT) {
+        const error = new Error("edit-limit-reached");
+        (error as any).code = "edit-limit-reached";
+        throw error;
+      }
+
+      transaction.update(actionRef, {
+        type: payload.type,
+        notes: payload.notes || null,
+        editCount: currentEditCount + 1,
+        updatedAt: serverTimestamp(),
+      });
     });
     void recordAuditEvent({
       eventType: "update",
       resourceType: "recycling_action",
       resourceId: id,
-      payload: { type: payload.type, notes: payload.notes || null },
+      payload: { type: payload.type, notes: payload.notes || null, editCount: 1 },
     });
   };
 

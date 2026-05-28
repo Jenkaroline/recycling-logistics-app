@@ -14,13 +14,12 @@ import {
   writeBatch,
   serverTimestamp,
   Timestamp,
-  updateDoc,
   setDoc,
   where,
 } from "firebase/firestore";
 import { auth, db } from "../service/firebaseConfig";
 import { recordAuditEvent } from "./auditLogger";
-import { useSocial } from "./SocialContext";
+import { useSocial, type SocialUser } from "./SocialContext";
 
 type GroupChatMessage = {
   id: string;
@@ -53,6 +52,8 @@ type CompetitionGroup = {
   members: CompetitionMember[];
   totalXp: number;
   totalActions: number;
+  memberIds?: string[];
+  membersIds?: string[];
   removedMemberIds?: string[];
 };
 
@@ -74,6 +75,12 @@ type GroupInvitation = {
   createdAt: string;
   updatedAt: string;
   respondedAt: string | null;
+};
+
+type SharedGroupTotals = {
+  totalXp: number;
+  totalActions: number;
+  memberTotals: Record<string, { totalXp: number; actionsCount: number }>;
 };
 
 type RecyclingCompetitionContextValue = {
@@ -154,10 +161,35 @@ function normalizeTimestamp(value: unknown): string {
 }
 
 function normalizeGroup(group: CompetitionGroup & { createdAt?: unknown }): CompetitionGroup {
+  const normalizedMembers = Array.isArray(group.members)
+    ? group.members.map((member) => ({
+        ...member,
+        totalXp: Number(member.totalXp || 0),
+        actionsCount: Number(member.actionsCount || 0),
+        isOwner: Boolean(member.isOwner),
+      }))
+    : [];
+
+  const explicitMemberIds = Array.isArray((group as CompetitionGroup & { memberIds?: unknown }).memberIds)
+    ? ((group as CompetitionGroup & { memberIds?: unknown }).memberIds as unknown[])
+    : Array.isArray((group as CompetitionGroup & { membersIds?: unknown }).membersIds)
+      ? ((group as CompetitionGroup & { membersIds?: unknown }).membersIds as unknown[])
+      : [];
+
+  const memberIds = Array.from(
+    new Set(
+      [
+        ...explicitMemberIds,
+        ...normalizedMembers.map((member) => member.id),
+        group.ownerId,
+      ].filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim()),
+    ),
+  );
+
   return {
     ...group,
     createdAt: normalizeTimestamp(group.createdAt),
-    ownerId: group.ownerId || group.members.find((member) => member.isOwner)?.id || "local-user",
+    ownerId: group.ownerId || normalizedMembers.find((member) => member.isOwner)?.id || "local-user",
     isActive: typeof group.isActive === "boolean" ? group.isActive : true,
     description: typeof group.description === "string" ? group.description : "",
     imageUrl: typeof group.imageUrl === "string" ? group.imageUrl : "",
@@ -168,14 +200,204 @@ function normalizeGroup(group: CompetitionGroup & { createdAt?: unknown }): Comp
     removedMemberIds: Array.isArray(group.removedMemberIds)
       ? Array.from(new Set(group.removedMemberIds.filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim())))
       : [],
-    members: Array.isArray(group.members)
-      ? group.members.map((member) => ({
+    members: normalizedMembers,
+    memberIds,
+    membersIds: memberIds,
+  };
+}
+
+function getGroupMemberIds(input: Partial<CompetitionGroup> | CompetitionGroup, fallback?: CompetitionGroup) {
+  const fromMembers = Array.isArray(input.members)
+    ? input.members.map((member) => member.id)
+    : [];
+  const fromExplicit = Array.isArray((input as CompetitionGroup & { memberIds?: unknown }).memberIds)
+    ? ((input as CompetitionGroup & { memberIds?: unknown }).memberIds as unknown[])
+    : Array.isArray((input as CompetitionGroup & { membersIds?: unknown }).membersIds)
+      ? ((input as CompetitionGroup & { membersIds?: unknown }).membersIds as unknown[])
+      : [];
+  const fromFallback = fallback?.members?.map((member) => member.id) || [];
+  const ownerId = input.ownerId || fallback?.ownerId || null;
+
+  return Array.from(
+    new Set(
+      [...fromMembers, ...fromExplicit, ...fromFallback, ownerId].filter(
+        (memberId): memberId is string => typeof memberId === "string" && memberId.trim(),
+      ),
+    ),
+  );
+}
+
+function buildAcceptedInvitationGroup(invitation: GroupInvitation): CompetitionGroup {
+  const baseMembers = invitation.membersSnapshot.some((member) => member.id === invitation.recipientUid)
+    ? invitation.membersSnapshot
+    : [
+        ...invitation.membersSnapshot,
+        {
+          id: invitation.recipientUid,
+          name: invitation.recipientName || invitation.recipientEmail.split("@")[0],
+          totalXp: 0,
+          actionsCount: 0,
+          isOwner: false,
+        },
+      ];
+
+  const memberIds = Array.from(new Set(baseMembers.map((member) => member.id).concat(invitation.ownerId)));
+
+  return normalizeGroup({
+    id: invitation.groupId,
+    name: invitation.groupName,
+    description: "",
+    imageUrl: "",
+    durationDays: undefined,
+    challengeEndsAt: null,
+    createdAt: invitation.groupCreatedAt,
+    ownerId: invitation.ownerId,
+    isActive: true,
+    members: baseMembers,
+    totalXp: baseMembers.reduce((sum, member) => sum + Number(member.totalXp || 0), 0),
+    totalActions: baseMembers.reduce((sum, member) => sum + Number(member.actionsCount || 0), 0),
+    memberIds,
+    membersIds: memberIds,
+    removedMemberIds: [],
+  });
+}
+
+function computeSharedGroupTotals(entries: Array<Record<string, unknown>>): SharedGroupTotals {
+  const memberTotals: SharedGroupTotals["memberTotals"] = {};
+  let totalXp = 0;
+  let totalActions = 0;
+
+  entries.forEach((entry) => {
+    const authorId = typeof entry.authorId === "string" ? entry.authorId : typeof entry.author === "string" ? entry.author : null;
+    const xp = Number(entry.xpEarned || entry.xp || 0);
+    const contestPenaltyApplied = Boolean(entry.contestPenaltyApplied);
+    const contestCount = Number(entry.contestCount || 0);
+
+    if (!authorId || contestPenaltyApplied || contestCount > 5) return;
+
+    const prev = memberTotals[authorId] || { totalXp: 0, actionsCount: 0 };
+    prev.totalXp += xp;
+    prev.actionsCount += 1;
+    memberTotals[authorId] = prev;
+
+    totalXp += xp;
+    totalActions += 1;
+  });
+
+  return { totalXp, totalActions, memberTotals };
+}
+
+function mergeSharedTotalsIntoGroup(group: CompetitionGroup, sharedTotals?: SharedGroupTotals | null): CompetitionGroup {
+  if (!sharedTotals) return group;
+
+  const nextMembers = (group.members || []).map((member) => ({
+    ...member,
+    totalXp: sharedTotals.memberTotals[member.id]?.totalXp ?? 0,
+    actionsCount: sharedTotals.memberTotals[member.id]?.actionsCount ?? 0,
+  }));
+
+  return {
+    ...group,
+    members: nextMembers,
+    totalXp: sharedTotals.totalXp,
+    totalActions: sharedTotals.totalActions,
+  };
+}
+
+function mergeSharedMembersIntoGroup(group: CompetitionGroup, invitations: GroupInvitation[]): CompetitionGroup {
+  const acceptedInvites = invitations.filter((invitation) => invitation.groupId === group.id && invitation.status === "accepted");
+  if (acceptedInvites.length === 0) return group;
+
+  const removedMemberIds = new Set(group.removedMemberIds || []);
+
+  const mergedMembers = new Map<string, CompetitionMember>();
+
+  group.members.forEach((member) => {
+    if (!removedMemberIds.has(member.id)) {
+      mergedMembers.set(member.id, member);
+    }
+  });
+
+  acceptedInvites.forEach((invitation) => {
+    const invitationMembers = Array.isArray(invitation.membersSnapshot) ? invitation.membersSnapshot : [];
+
+    invitationMembers.forEach((member) => {
+      if (!removedMemberIds.has(member.id) && !mergedMembers.has(member.id)) {
+        mergedMembers.set(member.id, {
           ...member,
           totalXp: Number(member.totalXp || 0),
           actionsCount: Number(member.actionsCount || 0),
           isOwner: Boolean(member.isOwner),
-        }))
-      : [],
+        });
+      }
+    });
+
+    if (!removedMemberIds.has(invitation.recipientUid) && !mergedMembers.has(invitation.recipientUid)) {
+      mergedMembers.set(invitation.recipientUid, {
+        id: invitation.recipientUid,
+        name: invitation.recipientName || invitation.recipientEmail.split("@")[0],
+        totalXp: 0,
+        actionsCount: 0,
+        isOwner: false,
+      });
+    }
+  });
+
+  const nextMembers = [...mergedMembers.values()];
+  const memberIds = Array.from(new Set(nextMembers.map((member) => member.id).concat(group.ownerId)));
+
+  return {
+    ...group,
+    members: nextMembers,
+    memberIds,
+    membersIds: memberIds,
+  };
+}
+
+function enrichGroupMembersFromUsers(group: CompetitionGroup, users: SocialUser[]): CompetitionGroup {
+  const usersById = new Map(users.map((user) => [user.uid, user]));
+  const removedMemberIds = new Set(group.removedMemberIds || []);
+  const memberMap = new Map<string, CompetitionMember>();
+
+  group.members.forEach((member) => {
+    if (!removedMemberIds.has(member.id)) {
+      memberMap.set(member.id, {
+        ...member,
+        isOwner: member.id === group.ownerId || Boolean(member.isOwner),
+      });
+    }
+  });
+
+  getGroupMemberIds(group).forEach((memberId) => {
+    if (removedMemberIds.has(memberId) || memberMap.has(memberId)) return;
+
+    const user = usersById.get(memberId);
+    memberMap.set(memberId, {
+      id: memberId,
+      name: user?.username?.trim() || (memberId === group.ownerId ? "Administrador" : "Membro"),
+      totalXp: 0,
+      actionsCount: 0,
+      isOwner: memberId === group.ownerId,
+    });
+  });
+
+  if (group.ownerId && !removedMemberIds.has(group.ownerId) && !memberMap.has(group.ownerId)) {
+    const ownerUser = usersById.get(group.ownerId);
+    memberMap.set(group.ownerId, {
+      id: group.ownerId,
+      name: ownerUser?.username?.trim() || "Administrador",
+      totalXp: 0,
+      actionsCount: 0,
+      isOwner: true,
+    });
+  }
+
+  return {
+    ...group,
+    members: [...memberMap.values()].map((member) => ({
+      ...member,
+      isOwner: member.id === group.ownerId || Boolean(member.isOwner),
+    })),
   };
 }
 
@@ -241,6 +463,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
   const [chatMessages, setChatMessages] = useState<GroupChatMessage[]>([]);
   const [ownedInvitations, setOwnedInvitations] = useState<GroupInvitation[]>([]);
   const [receivedInvitations, setReceivedInvitations] = useState<GroupInvitation[]>([]);
+  const [sharedGroupTotals, setSharedGroupTotals] = useState<Record<string, SharedGroupTotals>>({});
   const activeGroupIdRef = useRef<string | null>(null);
   const currentUidRef = useRef<string | null>(auth.currentUser?.uid || null);
 
@@ -249,16 +472,51 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
   }, [activeGroupId]);
 
   useEffect(() => {
-    let unsubscribeGroups: (() => void) | null = null;
+    let unsubscribeGroupsByMember: (() => void) | null = null;
+    let unsubscribeGroupsByOwner: (() => void) | null = null;
+    let unsubscribeGroupsByLegacyMemberField: (() => void) | null = null;
     let unsubscribeMeta: (() => void) | null = null;
     let unsubscribeMessages: (() => void) | null = null;
     let unsubscribeOwnedInvitations: (() => void) | null = null;
     let unsubscribeReceivedInvitations: (() => void) | null = null;
+    let groupsByMember = new Map<string, CompetitionGroup>();
+    let groupsByOwner = new Map<string, CompetitionGroup>();
+    let groupsByLegacyMember = new Map<string, CompetitionGroup>();
+
+    const syncLoadedGroups = () => {
+      const mergedById = new Map<string, CompetitionGroup>();
+      for (const [id, group] of groupsByOwner.entries()) mergedById.set(id, group);
+      for (const [id, group] of groupsByMember.entries()) mergedById.set(id, group);
+      for (const [id, group] of groupsByLegacyMember.entries()) mergedById.set(id, group);
+
+      const loadedGroups = [...mergedById.values()].sort((a, b) => {
+        const tb = Date.parse(normalizeTimestamp(b.createdAt));
+        const ta = Date.parse(normalizeTimestamp(a.createdAt));
+        return tb - ta;
+      });
+
+      setGroups(loadedGroups);
+      setActiveGroupIdState((current) =>
+        loadedGroups.some((group) => group.id === current && group.isActive)
+          ? current
+          : loadedGroups.some((group) => group.id === activeGroupIdRef.current && group.isActive)
+            ? activeGroupIdRef.current
+            : null,
+      );
+    };
 
     const bindForUid = (uid: string | null) => {
-      if (unsubscribeGroups) {
-        unsubscribeGroups();
-        unsubscribeGroups = null;
+      if (unsubscribeGroupsByMember) {
+        unsubscribeGroupsByMember();
+        unsubscribeGroupsByMember = null;
+      }
+      if (unsubscribeGroupsByOwner) {
+        unsubscribeGroupsByOwner();
+        unsubscribeGroupsByOwner = null;
+      }
+      if (unsubscribeGroupsByLegacyMemberField) {
+        unsubscribeGroupsByLegacyMemberField();
+        unsubscribeGroupsByLegacyMemberField = null;
       }
       if (unsubscribeMeta) {
         unsubscribeMeta();
@@ -278,6 +536,9 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       }
 
       if (!uid) {
+        groupsByMember = new Map<string, CompetitionGroup>();
+        groupsByOwner = new Map<string, CompetitionGroup>();
+        groupsByLegacyMember = new Map<string, CompetitionGroup>();
         setGroups([]);
         setActiveGroupIdState(null);
         setChatMessages([]);
@@ -286,35 +547,78 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         return;
       }
 
-      const groupsQuery = query(
-        collection(db, "users", uid, "competitionGroups"),
-        orderBy("createdAt", "desc"),
-      );
-      unsubscribeGroups = onSnapshot(
-        groupsQuery,
+      const groupsByMemberQuery = query(collection(db, "groups"), where("memberIds", "array-contains", uid));
+      unsubscribeGroupsByMember = onSnapshot(
+        groupsByMemberQuery,
         (snapshot) => {
-          const loadedGroups = snapshot.docs.map((snap) =>
-            normalizeGroup({
-              id: snap.id,
-              ...(snap.data() as Omit<CompetitionGroup, "id">),
-            }),
+          groupsByMember = new Map(
+            snapshot.docs.map((snap) => [
+              snap.id,
+              normalizeGroup({
+                id: snap.id,
+                ...(snap.data() as Omit<CompetitionGroup, "id">),
+              }),
+            ]),
           );
-
-          setGroups(loadedGroups);
-          setActiveGroupIdState((current) =>
-            loadedGroups.some((group) => group.id === current && group.isActive)
-              ? current
-              : loadedGroups.some((group) => group.id === activeGroupIdRef.current && group.isActive)
-                ? activeGroupIdRef.current
-                : null,
-          );
+          syncLoadedGroups();
         },
         (error) => {
           if (error.code === "permission-denied") {
-            setGroups([]);
+            groupsByMember = new Map<string, CompetitionGroup>();
+            syncLoadedGroups();
             return;
           }
-          console.warn("Competition groups listener failed:", error);
+          console.warn("Competition groups-by-member listener failed:", error);
+        },
+      );
+
+      const groupsByOwnerQuery = query(collection(db, "groups"), where("ownerId", "==", uid));
+      unsubscribeGroupsByOwner = onSnapshot(
+        groupsByOwnerQuery,
+        (snapshot) => {
+          groupsByOwner = new Map(
+            snapshot.docs.map((snap) => [
+              snap.id,
+              normalizeGroup({
+                id: snap.id,
+                ...(snap.data() as Omit<CompetitionGroup, "id">),
+              }),
+            ]),
+          );
+          syncLoadedGroups();
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            groupsByOwner = new Map<string, CompetitionGroup>();
+            syncLoadedGroups();
+            return;
+          }
+          console.warn("Competition groups-by-owner listener failed:", error);
+        },
+      );
+
+      const groupsByLegacyMemberFieldQuery = query(collection(db, "groups"), where("membersIds", "array-contains", uid));
+      unsubscribeGroupsByLegacyMemberField = onSnapshot(
+        groupsByLegacyMemberFieldQuery,
+        (snapshot) => {
+          groupsByLegacyMember = new Map(
+            snapshot.docs.map((snap) => [
+              snap.id,
+              normalizeGroup({
+                id: snap.id,
+                ...(snap.data() as Omit<CompetitionGroup, "id">),
+              }),
+            ]),
+          );
+          syncLoadedGroups();
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            groupsByLegacyMember = new Map<string, CompetitionGroup>();
+            syncLoadedGroups();
+            return;
+          }
+          console.warn("Competition groups-by-legacy-member-field listener failed:", error);
         },
       );
 
@@ -396,7 +700,16 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       bindForUid(u?.uid || null);
     });
 
-    return () => unsub();
+    return () => {
+      unsub();
+      if (unsubscribeGroupsByMember) unsubscribeGroupsByMember();
+      if (unsubscribeGroupsByOwner) unsubscribeGroupsByOwner();
+      if (unsubscribeGroupsByLegacyMemberField) unsubscribeGroupsByLegacyMemberField();
+      if (unsubscribeMeta) unsubscribeMeta();
+      if (unsubscribeMessages) unsubscribeMessages();
+      if (unsubscribeOwnedInvitations) unsubscribeOwnedInvitations();
+      if (unsubscribeReceivedInvitations) unsubscribeReceivedInvitations();
+    };
   }, []);
 
   const persistActiveGroupId = async (nextActiveGroupId: string | null) => {
@@ -440,29 +753,115 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     });
   }, [ownedInvitations, receivedInvitations]);
 
-  const writeGroup = async (groupId: string, payload: Partial<CompetitionGroup>) => {
-    const uid = currentUidRef.current;
-    if (!uid) return;
+  const groupIdsForSharedTotals = useMemo(() => {
+    const ids = new Set<string>();
+    groups.forEach((group) => ids.add(group.id));
+    receivedInvitations.filter((invitation) => invitation.status === "accepted").forEach((invitation) => ids.add(invitation.groupId));
+    return [...ids];
+  }, [groups, receivedInvitations]);
 
-    await setDoc(
-      doc(db, "users", uid, "competitionGroups", groupId),
-      {
-        ...payload,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+  useEffect(() => {
+    const unsubscribers: Array<() => void> = [];
+
+    groupIdsForSharedTotals.forEach((groupId) => {
+      const entriesQuery = query(collection(db, "groupRecyclingActions", groupId, "entries"));
+      const unsubscribe = onSnapshot(
+        entriesQuery,
+        (snapshot) => {
+          const nextTotals = computeSharedGroupTotals(snapshot.docs.map((snap) => snap.data() as Record<string, unknown>));
+          setSharedGroupTotals((current) => {
+            const existing = current[groupId];
+            if (
+              existing &&
+              existing.totalXp === nextTotals.totalXp &&
+              existing.totalActions === nextTotals.totalActions &&
+              JSON.stringify(existing.memberTotals) === JSON.stringify(nextTotals.memberTotals)
+            ) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [groupId]: nextTotals,
+            };
+          });
+        },
+        (error) => {
+          if ((error as { code?: string })?.code === "permission-denied") {
+            setSharedGroupTotals((current) => {
+              if (!(groupId in current)) return current;
+              const next = { ...current };
+              delete next[groupId];
+              return next;
+            });
+            return;
+          }
+
+          console.warn("Shared group totals listener failed:", error);
+        },
+      );
+
+      unsubscribers.push(unsubscribe);
+    });
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [groupIdsForSharedTotals]);
+
+  const groupsForDisplay = useMemo(() => {
+    const merged = new Map<string, CompetitionGroup>();
+
+    groups.forEach((group) => {
+      merged.set(group.id, group);
+    });
+
+    const acceptedInvitationGroups = receivedInvitations
+      .filter((invitation) => invitation.status === "accepted")
+      .map((invitation) => buildAcceptedInvitationGroup(invitation));
+
+    acceptedInvitationGroups.forEach((group) => {
+      if (!merged.has(group.id)) {
+        merged.set(group.id, group);
+      }
+    });
+
+    for (const [groupId, group] of merged.entries()) {
+      const withMembers = enrichGroupMembersFromUsers(
+        mergeSharedMembersIntoGroup(group, groupInvitations),
+        users,
+      );
+      merged.set(groupId, mergeSharedTotalsIntoGroup(withMembers, sharedGroupTotals[groupId]));
+    }
+
+    return [...merged.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }, [groups, groupInvitations, sharedGroupTotals, users]);
+
+  const appendGroupHistory = async (
+    groupId: string,
+    changeType: string,
+    payload: Record<string, unknown>,
+  ) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    try {
+      await addDoc(collection(db, "groups", groupId, "history"), {
+        changeType,
+        payload,
+        actorId: user.uid,
+        actorName: user.displayName?.trim() || user.email?.split("@")[0] || "Usuário",
+        createdAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.warn("[appendGroupHistory] failed:", error);
+    }
   };
 
   const propagateGroupUpdate = async (groupId: string, payload: Partial<CompetitionGroup> | CompetitionGroup) => {
-    const group = groups.find((g) => g.id === groupId);
+    const group = groupsForDisplay.find((g) => g.id === groupId);
     if (!group) return;
 
-    const memberIds = new Set<string>();
-    (group.members || []).forEach((m) => memberIds.add(m.id));
-    if (group.ownerId) memberIds.add(group.ownerId);
-
-    const batch = writeBatch(db);
     const sanitize = (v: any): any => {
       if (v === undefined) return undefined;
       if (v === null) return null;
@@ -479,98 +878,22 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     };
 
     const cleaned = sanitize(payload);
-
-    for (const memberId of memberIds) {
-      batch.set(
-        doc(db, "users", memberId, "competitionGroups", groupId),
-        {
-          ...(cleaned as object),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-    }
-
-    try {
-      await batch.commit();
-    } catch (err: any) {
-      console.warn("[propagateGroupUpdate] batch commit failed, falling back to owner-only write", err);
-      const isPerm = err && (err.code === "permission-denied" || /permission|insufficient/i.test(String(err?.message || "")));
-      if (isPerm) {
-        // fallback: write only to the current user's copy so the operation doesn't fail
-        try {
-          await writeGroup(groupId, cleaned as Partial<CompetitionGroup>);
-        } catch (err2) {
-          console.error("[propagateGroupUpdate] fallback writeGroup also failed", err2);
-          throw err2;
-        }
-        // still attempt to write the public group doc if permitted
-        try {
-          await setDoc(doc(db, "groups", groupId), { ...(cleaned as object), updatedAt: serverTimestamp() }, { merge: true });
-        } catch (err3) {
-          // ignore — rules may prevent writing shared doc in some setups
-          console.warn("[propagateGroupUpdate] writing public groups doc failed", err3);
-        }
-        return;
-      }
-      throw err;
-    }
-
-    // also update the public groups collection so group image/name is visible to all
-    try {
-      await setDoc(doc(db, "groups", groupId), { ...(cleaned as object), updatedAt: serverTimestamp() }, { merge: true });
-    } catch (err) {
-      // if this fails due to permissions, it's non-fatal (we already propagated to member docs or fell back)
-      console.warn("[propagateGroupUpdate] failed to write public groups doc", err);
-    }
-  };
-
-  const propagateGroupDelete = async (groupId: string) => {
-    const group = groups.find((g) => g.id === groupId);
-    if (!group) return;
-
-    const memberIds = new Set<string>();
-    (group.members || []).forEach((m) => memberIds.add(m.id));
-    if (group.ownerId) memberIds.add(group.ownerId);
-
-    const batch = writeBatch(db);
-    for (const memberId of memberIds) {
-      batch.delete(doc(db, "users", memberId, "competitionGroups", groupId));
-    }
-
-    try {
-      await batch.commit();
-    } catch (err) {
-      console.warn("[propagateGroupDelete] batch commit failed, falling back to owner-only delete", err);
-      const uid = currentUidRef.current;
-      if (uid) {
-        try {
-          await deleteDoc(doc(db, "users", uid, "competitionGroups", groupId));
-        } catch (err2) {
-          console.warn("[propagateGroupDelete] fallback delete failed", err2);
-        }
-      }
-    }
-
-    try {
-      await deleteDoc(doc(db, "groups", groupId));
-    } catch (err) {
-      console.warn("[propagateGroupDelete] failed to delete public groups doc", err);
-    }
-  };
-
-  const persistGroupCopy = async (group: CompetitionGroup) => {
-    const uid = currentUidRef.current;
-    if (!uid) return;
+    const memberIds = getGroupMemberIds(cleaned as Partial<CompetitionGroup>, group);
 
     await setDoc(
-      doc(db, "users", uid, "competitionGroups", group.id),
+      doc(db, "groups", groupId),
       {
-        ...group,
+        ...(cleaned as object),
+        memberIds,
+        membersIds: memberIds,
         updatedAt: serverTimestamp(),
       },
       { merge: true },
     );
+  };
+
+  const propagateGroupDelete = async (groupId: string) => {
+    await deleteDoc(doc(db, "groups", groupId));
   };
 
   const createGroup = async (input: {
@@ -589,7 +912,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const durationDays = Number(input.durationDays || 0) > 0 ? Math.floor(Number(input.durationDays)) : undefined;
     const challengeEndsAt = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
-    const groupRef = doc(collection(db, "users", uid, "competitionGroups"));
+    const groupRef = doc(collection(db, "groups"));
     const nextGroup: CompetitionGroup = {
       id: groupRef.id,
       name: trimmed,
@@ -602,30 +925,23 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       isActive: true,
       totalXp: 0,
       totalActions: 0,
+      memberIds: [uid],
+      membersIds: [uid],
       members: [createOwnerMember(now)],
     };
 
     await setDoc(groupRef, {
       ...nextGroup,
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
-    // create public group document so image/name are visible to all members
-    try {
-      await setDoc(doc(db, "groups", nextGroup.id), {
-        id: nextGroup.id,
-        name: nextGroup.name,
-        description: nextGroup.description || "",
-        imageUrl: nextGroup.imageUrl || "",
-        durationDays: nextGroup.durationDays || null,
-        challengeEndsAt: nextGroup.challengeEndsAt || null,
-        ownerId: nextGroup.ownerId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        membersIds: nextGroup.members.map((m) => m.id || null).filter(Boolean),
-      }, { merge: true });
-    } catch (err) {
-      console.warn("[createGroup] failed to write public groups doc", err);
-    }
+
+    await appendGroupHistory(nextGroup.id, "group_created", {
+      name: trimmed,
+      description: nextGroup.description || "",
+      durationDays: nextGroup.durationDays || null,
+      hasImage: Boolean(nextGroup.imageUrl),
+    });
     try {
       await persistActiveGroupId(nextGroup.id);
     } catch {
@@ -657,7 +973,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       return;
     }
 
-    const exists = groups.some((group) => group.id === groupId && group.isActive);
+    const exists = groupsForDisplay.some((group) => group.id === groupId && group.isActive);
     if (!exists) return;
     await persistActiveGroupId(groupId);
     void recordAuditEvent({
@@ -672,10 +988,11 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const currentUid = currentUidRef.current;
     if (!currentUid) return;
 
-    const target = groups.find((item) => item.id === groupId);
+    const target = groupsForDisplay.find((item) => item.id === groupId);
     if (!target || !isGroupOwner(target, currentUid)) return;
 
     await propagateGroupUpdate(groupId, { isActive: false });
+    await appendGroupHistory(groupId, "group_deactivated", { isActive: false });
 
     const nextActiveGroupId = activeGroupIdRef.current === groupId ? null : activeGroupIdRef.current;
     await persistActiveGroupId(nextActiveGroupId);
@@ -691,10 +1008,11 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const currentUid = currentUidRef.current;
     if (!currentUid) return;
 
-    const target = groups.find((item) => item.id === groupId);
+    const target = groupsForDisplay.find((item) => item.id === groupId);
     if (!target || !isGroupOwner(target, currentUid)) return;
 
     await propagateGroupUpdate(groupId, { isActive: true });
+    await appendGroupHistory(groupId, "group_activated", { isActive: true });
     await persistActiveGroupId(groupId);
     void recordAuditEvent({
       eventType: "activate",
@@ -709,6 +1027,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     if (!trimmed) return;
 
     await propagateGroupUpdate(groupId, { name: trimmed });
+    await appendGroupHistory(groupId, "group_updated", { name: trimmed });
     void recordAuditEvent({
       eventType: "update",
       resourceType: "recycling_group",
@@ -750,6 +1069,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
 
     // propagate changes to all members so updates are visible to everyone
     await propagateGroupUpdate(groupId, payload);
+    await appendGroupHistory(groupId, "group_updated", auditPayload);
     void recordAuditEvent({
       eventType: "update",
       resourceType: "recycling_group",
@@ -762,6 +1082,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const uid = currentUidRef.current;
     if (!uid) return;
 
+    await appendGroupHistory(groupId, "group_deleted", {});
     await propagateGroupDelete(groupId);
 
     const nextActiveGroupId = activeGroupIdRef.current === groupId ? null : activeGroupIdRef.current;
@@ -785,7 +1106,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       throw createInvitationError("invalid-email", "Informe um e-mail válido.");
     }
 
-    const currentGroup = groups.find((group) => group.id === activeGroupIdRef.current);
+    const currentGroup = groupsForDisplay.find((group) => group.id === activeGroupIdRef.current);
     if (!currentGroup) {
       throw createInvitationError("no-active-group", "Selecione um grupo para enviar o convite.");
     }
@@ -869,28 +1190,8 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       }
 
       if (!recipient) {
-        // Debug logging to help identify why lookup failed for specific email
-        try {
-          console.error("[sendGroupInvitation] recipient not found debug", {
-            email: trimmedEmail,
-            groupId: currentGroup.id,
-            recipientFromMemory: Boolean(recipientFromMemory),
-            recipientFromMemoryEmail: recipientFromMemory ? normalizeEmail((recipientFromMemory as any).email) || (recipientFromMemory as any).emailLower : null,
-            exactMatchCount: exactMatchSnapshot ? exactMatchSnapshot.docs.length : 0,
-            exactMatchByEmailCount: exactMatchByEmail ? exactMatchByEmail.docs.length : 0,
-            allUsersCount: allUsersSnapshot ? allUsersSnapshot.docs.length : 0,
-            sampleFirstUserEmails: allUsersSnapshot && allUsersSnapshot.docs.length ? allUsersSnapshot.docs.slice(0,5).map((d: any) => ({ id: d.id, email: normalizeEmail((d.data() as any).emailLower || (d.data() as any).email) })) : [],
-          });
-        } catch (err) {
-          console.warn("[sendGroupInvitation] debug logging failed", err);
-        }
       }
     } catch (error) {
-      console.error("[sendGroupInvitation] recipient lookup failed", {
-        email: trimmedEmail,
-        groupId: currentGroup.id,
-        error,
-      });
       throw createInvitationError(
         "lookup-failed",
         "Não foi possível validar o e-mail agora. Verifique sua conexão e tente novamente.",
@@ -900,7 +1201,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const currentUserName = getCurrentUserName();
 
     if (!recipient) {
-      throw createInvitationError("not-found", `O e-mail ${trimmedEmail} não está cadastrado no app.`);
+      throw createInvitationError(
+        "not-found",
+        "Não encontramos essa pessoa no app. Peça para ela se cadastrar e tente novamente.",
+      );
     }
 
     const isAlreadyMember = currentGroup.members.some((member) => member.id === recipient.uid);
@@ -981,6 +1285,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       resourceId: currentGroup.id,
       payload: { recipientEmail: trimmedEmail },
     });
+    await appendGroupHistory(currentGroup.id, "member_invited", {
+      recipientEmail: trimmedEmail,
+      recipientUid: recipient.uid,
+    });
 
     console.info("[sendGroupInvitation] invite created", {
       groupId: currentGroup.id,
@@ -1006,33 +1314,6 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const invitation = receivedInvitations.find((item) => item.id === invitationId && item.recipientUid === uid);
     if (!invitation || invitation.status !== "pending") return;
 
-    const currentUserName = getCurrentUserName();
-    const nextMembers = invitation.membersSnapshot.some((member) => member.id === uid)
-      ? invitation.membersSnapshot
-      : [
-          ...invitation.membersSnapshot,
-          {
-            id: uid,
-            name: currentUserName,
-            totalXp: 0,
-            actionsCount: 0,
-            isOwner: false,
-          },
-        ];
-
-    const nextGroup: CompetitionGroup = {
-      id: invitation.groupId,
-      name: invitation.groupName,
-      createdAt: invitation.groupCreatedAt,
-      ownerId: invitation.ownerId,
-      isActive: true,
-      totalXp: invitation.membersSnapshot.reduce((sum, member) => sum + Number(member.totalXp || 0), 0),
-      totalActions: invitation.membersSnapshot.reduce((sum, member) => sum + Number(member.actionsCount || 0), 0),
-      members: nextMembers,
-      removedMemberIds: [],
-    };
-
-    await persistGroupCopy(nextGroup);
     await persistActiveGroupId(invitation.groupId);
 
     const statusUpdate = {
@@ -1049,6 +1330,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       resourceType: "recycling_group",
       resourceId: invitation.groupId,
       payload: { invitationId },
+    });
+    await appendGroupHistory(invitation.groupId, "member_invite_accepted", {
+      invitationId,
+      recipientUid: uid,
     });
   };
 
@@ -1074,6 +1359,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       resourceId: invitation.groupId,
       payload: { invitationId },
     });
+    await appendGroupHistory(invitation.groupId, "member_invite_declined", {
+      invitationId,
+      recipientUid: uid,
+    });
   };
 
   useEffect(() => {
@@ -1081,32 +1370,48 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     if (!currentUid || ownedInvitations.length === 0 || groups.length === 0) return;
 
     void (async () => {
-      for (const invitation of ownedInvitations) {
-        if (invitation.status !== "accepted") continue;
+      try {
+        for (const invitation of ownedInvitations) {
+          if (invitation.status !== "accepted") continue;
 
-        const targetGroup = groups.find((group) => group.id === invitation.groupId);
-        if (!targetGroup) continue;
+          const targetGroup = groupsForDisplay.find((group) => group.id === invitation.groupId);
+          if (!targetGroup) continue;
 
-        const hasRecipient = targetGroup.members.some((member) => member.id === invitation.recipientUid);
-        if (hasRecipient) continue;
-        if ((targetGroup.removedMemberIds || []).includes(invitation.recipientUid)) continue;
+          // Membership reconciliation is owner-authoritative.
+          if (targetGroup.ownerId !== currentUid) continue;
 
-        const nextGroup = {
-          ...targetGroup,
-          members: [
-            ...targetGroup.members,
-            {
-              id: invitation.recipientUid,
-              name: invitation.recipientName || invitation.recipientEmail.split("@")[0],
-              totalXp: 0,
-              actionsCount: 0,
-              isOwner: false,
-            },
-          ],
-          removedMemberIds: (targetGroup.removedMemberIds || []).filter((memberId) => memberId !== invitation.recipientUid),
-        };
+          const hasRecipient = targetGroup.members.some((member) => member.id === invitation.recipientUid);
+          if (hasRecipient) continue;
+          if ((targetGroup.removedMemberIds || []).includes(invitation.recipientUid)) continue;
 
-        await propagateGroupUpdate(targetGroup.id, nextGroup);
+          const nextGroup = {
+            ...targetGroup,
+            members: [
+              ...targetGroup.members,
+              {
+                id: invitation.recipientUid,
+                name: invitation.recipientName || invitation.recipientEmail.split("@")[0],
+                totalXp: 0,
+                actionsCount: 0,
+                isOwner: false,
+              },
+            ],
+            removedMemberIds: (targetGroup.removedMemberIds || []).filter((memberId) => memberId !== invitation.recipientUid),
+          };
+
+          await propagateGroupUpdate(targetGroup.id, nextGroup);
+          await appendGroupHistory(targetGroup.id, "member_added", {
+            memberId: invitation.recipientUid,
+            memberName: invitation.recipientName || invitation.recipientEmail.split("@")[0],
+          });
+        }
+      } catch (error) {
+        const code = (error as { code?: string })?.code;
+        if (code === "permission-denied") {
+          console.warn("[InvitationReconcile] permission denied while syncing accepted invitations");
+          return;
+        }
+        console.error("[InvitationReconcile] failed:", error);
       }
     })();
   }, [groups, ownedInvitations]);
@@ -1115,7 +1420,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const groupId = activeGroupIdRef.current;
     if (!groupId) return;
 
-    const group = groups.find((item) => item.id === groupId);
+    const group = groupsForDisplay.find((item) => item.id === groupId);
     if (!group) return;
 
     const member = group.members.find((item) => item.id === memberId);
@@ -1128,6 +1433,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     };
 
     await propagateGroupUpdate(groupId, nextGroup);
+    await appendGroupHistory(groupId, "member_removed", { memberId });
     void recordAuditEvent({
       eventType: "member_remove",
       resourceType: "recycling_group",
@@ -1160,7 +1466,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const uid = currentUidRef.current;
     if (!uid) return;
 
-    const group = groups.find((g) => g.id === groupId);
+    const group = groupsForDisplay.find((g) => g.id === groupId);
     if (!group) return;
 
     const isCallerOwner = group.ownerId === uid;
@@ -1194,6 +1500,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       };
 
       await propagateGroupUpdate(groupId, payload);
+      await appendGroupHistory(groupId, "owner_transferred", {
+        removedMemberId: memberId,
+        promotedTo: newOwner.id,
+      });
       void recordAuditEvent({
         eventType: "member_remove_promote",
         resourceType: "recycling_group",
@@ -1206,6 +1516,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     // Removing a normal member: propagate to all members
     const nextMembers = group.members.filter((m) => m.id !== memberId);
     await propagateGroupUpdate(groupId, { members: nextMembers });
+    await appendGroupHistory(groupId, "member_removed", { memberId });
     await markAcceptedInvitationAsRemoved(groupId, memberId);
     if (memberId !== uid) {
       try {
@@ -1243,7 +1554,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     if (!groupId || xp <= 0) return;
 
     const currentUserId = currentUidRef.current || "local-user";
-    const group = groups.find((item) => item.id === groupId);
+    const group = groupsForDisplay.find((item) => item.id === groupId);
     if (!group) return;
 
     let ownerUpdated = false;
@@ -1275,7 +1586,22 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       totalActions: group.totalActions + 1,
     };
 
-    await propagateGroupUpdate(groupId, nextGroup);
+    try {
+      await propagateGroupUpdate(groupId, nextGroup);
+      await appendGroupHistory(groupId, "xp_awarded", {
+        xp,
+        actorId: currentUserId,
+      });
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== "permission-denied") {
+        throw error;
+      }
+      console.warn("[awardXpToActiveGroup] permission denied to persist group totals; relying on shared entries", {
+        groupId,
+        actorId: currentUserId,
+      });
+    }
     void recordAuditEvent({
       eventType: "update",
       resourceType: "recycling_group",
@@ -1294,7 +1620,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     if (!groupId || xpDelta === 0) return;
 
     const currentUserId = currentUidRef.current || "local-user";
-    const group = groups.find((item) => item.id === groupId);
+    const group = groupsForDisplay.find((item) => item.id === groupId);
     if (!group) return;
 
     const nextXp = Math.max(0, group.totalXp + xpDelta);
@@ -1313,7 +1639,22 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       totalXp: nextXp,
     };
 
-    await propagateGroupUpdate(groupId, nextGroup);
+    try {
+      await propagateGroupUpdate(groupId, nextGroup);
+      await appendGroupHistory(groupId, "xp_adjusted", {
+        xpDelta,
+        actorId: currentUserId,
+      });
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== "permission-denied") {
+        throw error;
+      }
+      console.warn("[adjustGroupXp] permission denied to persist totals", {
+        groupId,
+        actorId: currentUserId,
+      });
+    }
     void recordAuditEvent({
       eventType: "update",
       resourceType: "recycling_group",
@@ -1328,7 +1669,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
   };
 
   const recomputeGroupTotals = async (groupId: string) => {
-    const group = groups.find((g) => g.id === groupId);
+    const group = groupsForDisplay.find((g) => g.id === groupId);
     if (!group) return;
 
     try {
@@ -1362,7 +1703,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         actionsCount: perUser.get(member.id)?.actionsCount || 0,
       }));
 
-      await propagateGroupUpdate(groupId, { members: nextMembers, totalXp, totalActions });
+      try {
+        await propagateGroupUpdate(groupId, { members: nextMembers, totalXp, totalActions });
+        await appendGroupHistory(groupId, "totals_recomputed", { totalXp, totalActions });
+      } catch (error) {
+        const code = (error as { code?: string })?.code;
+        if (code !== "permission-denied") {
+          throw error;
+        }
+        console.warn("[recomputeGroupTotals] permission denied to persist recomputed totals", { groupId });
+        return;
+      }
       void recordAuditEvent({
         eventType: "recompute",
         resourceType: "recycling_group",
@@ -1449,30 +1800,8 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
   }, [activeGroupId]);
 
   const activeGroup = useMemo(() => {
-    const base = groups.find((group) => group.id === activeGroupId && group.isActive) || null;
-    if (!base) return null;
-
-    // Merge accepted invitations into members so accepted users appear
-    const acceptedInvites = groupInvitations.filter((inv) => inv.groupId === base.id && inv.status === "accepted");
-    if (acceptedInvites.length === 0) return base;
-
-    const extraMembers: CompetitionMember[] = acceptedInvites
-      .map((inv) => ({
-        id: inv.recipientUid,
-        name: inv.recipientName || inv.recipientEmail.split("@")[0],
-        totalXp: 0,
-        actionsCount: 0,
-        isOwner: false,
-      }))
-      .filter((m) => !base.members.some((bm) => bm.id === m.id) && !(base.removedMemberIds || []).includes(m.id));
-
-    if (extraMembers.length === 0) return base;
-
-    return {
-      ...base,
-      members: [...base.members, ...extraMembers],
-    };
-  }, [groups, activeGroupId, groupInvitations]);
+    return groupsForDisplay.find((group) => group.id === activeGroupId && group.isActive) || null;
+  }, [groupsForDisplay, activeGroupId]);
   const rankedMembers = useMemo(() => {
     if (!activeGroup) return [];
     return [...activeGroup.members].sort((a, b) => {
@@ -1484,7 +1813,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
   return (
     <RecyclingCompetitionContext.Provider
       value={{
-        groups,
+        groups: groupsForDisplay,
         activeGroupId,
         activeGroup,
         rankedMembers,
@@ -1502,11 +1831,12 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         acceptGroupInvitation,
         declineGroupInvitation,
         removeMemberFromActiveGroup,
-          removeMember,
-          leaveGroup,
+        removeMember,
+        leaveGroup,
         awardXpToActiveGroup,
         adjustGroupXp,
         addChatMessage,
+        recomputeGroupTotals,
       }}
     >
       {children}

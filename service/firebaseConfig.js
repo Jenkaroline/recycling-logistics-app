@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, initializeAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
@@ -57,5 +57,16 @@ export const auth = Platform.OS === "web"
         return getAuth(app);
       }
     })();
-export const db = getFirestore(app);
+export const db = Platform.OS === "web"
+  ? getFirestore(app)
+  : (() => {
+      try {
+        return initializeFirestore(app, {
+          experimentalForceLongPolling: true,
+          useFetchStreams: false,
+        });
+      } catch {
+        return getFirestore(app);
+      }
+    })();
 export const storage = getStorage(app);

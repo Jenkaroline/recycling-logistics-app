@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import "react-native-reanimated";
 import * as Linking from "expo-linking";
+import { ThemePreferenceProvider } from "../src/ThemePreferenceContext";
 
 export default function RootLayout() {
   const router = useRouter();
@@ -58,9 +59,11 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <ThemeProvider value={DefaultTheme}>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }} />
-    </ThemeProvider>
+    <ThemePreferenceProvider>
+      <ThemeProvider value={DefaultTheme}>
+        <StatusBar style="light" />
+        <Stack screenOptions={{ headerShown: false }} />
+      </ThemeProvider>
+    </ThemePreferenceProvider>
   );
 }

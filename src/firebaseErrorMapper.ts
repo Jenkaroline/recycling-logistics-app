@@ -33,6 +33,7 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
     "unavailable": "O serviço está temporariamente indisponível. Tente novamente em instantes.",
     "deadline-exceeded": "A operação demorou demais. Tente novamente.",
     "already-exists": "Esse item já existe.",
+    "edit-limit-reached": "Este registro já atingiu o limite de 3 edições.",
   };
 
   if (code && map[code]) return map[code];

@@ -94,7 +94,7 @@ export default function StatisticsScreen() {
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
-  const { entries } = usePlasticConsumption();
+  const { entries, goalGrams } = usePlasticConsumption();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const [statsRange, setStatsRange] = useState<DashboardRange>("month");
@@ -118,47 +118,39 @@ export default function StatisticsScreen() {
         bg: "#061526",
         panel: "#0c2740",
         panelAlt: "#123252",
-        textPrimary: "#ffffff",
+        panelSoft: "#0f3556",
+        textPrimary: "#eaf4ff",
         textSecondary: "#b7cde6",
-        textMuted: "#9ab6d3",
-        textSoft: "#d7ebff",
-        statsPanel: "#0a2034",
-        statsPanelAlt: "#102a43",
-        statsBorder: "#1d3b5c",
-        statsBorderAlt: "#244463",
-        statsTextMuted: "#b7b7b7",
-        statsTextSubtle: "#d7d7d7",
-        segmentBg: "#0c2237",
-        segmentBgActive: "#f5f5f5",
-        segmentBorder: "#244463",
-        segmentBorderActive: "#ffffff",
-        segmentText: "#f4f4f4",
-        segmentTextActive: "#000000",
+        textMuted: "#8aa6c0",
+        accent: "#0fd3b6",
+        accentSoft: "rgba(15, 211, 182, 0.14)",
+        accentLine: "rgba(15, 211, 182, 0.4)",
+        danger: "#ff8b94",
+        dangerSoft: "rgba(255, 139, 148, 0.14)",
+        cardBorder: "#1e3a57",
+        inputText: "#eaf4ff",
+        inputLabel: "#cfe3f8",
       }
     : {
         bg: "#f4f8fc",
         panel: "#ffffff",
         panelAlt: "#edf3f9",
-        textPrimary: "#173047",
-        textSecondary: "#485c70",
-        textMuted: "#576d82",
-        textSoft: "#1f3b55",
-        statsPanel: "#ffffff",
-        statsPanelAlt: "#f8fbff",
-        statsBorder: "#d7e5f2",
-        statsBorderAlt: "#dbe8f5",
-        statsTextMuted: "#4d6378",
-        statsTextSubtle: "#3f556a",
-        segmentBg: "#eef4fa",
-        segmentBgActive: "#dbe9f6",
-        segmentBorder: "#c7d8e8",
-        segmentBorderActive: "#89aac7",
-        segmentText: "#3f566b",
-        segmentTextActive: "#10293f",
+        panelSoft: "#eaf2fb",
+        textPrimary: "#1d3750",
+        textSecondary: "#5d748b",
+        textMuted: "#6b7f95",
+        accent: "#1f6fb2",
+        accentSoft: "rgba(31, 111, 178, 0.10)",
+        accentLine: "rgba(31, 111, 178, 0.18)",
+        danger: "#b3314d",
+        dangerSoft: "rgba(179, 49, 77, 0.10)",
+        cardBorder: "#d7e5f2",
+        inputText: "#1f3346",
+        inputLabel: "#5d748b",
       };
 
   const dashboard = useMemo(() => {
-    const goalPerDay = 50;
+    const goalPerDay = goalGrams ?? 50;
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
@@ -181,12 +173,20 @@ export default function StatisticsScreen() {
     previousStart.setDate(previousStart.getDate() - rangeDays);
 
     const normalized = [...entries]
-      .map((entry) => ({
-        grams: entry.amountGrams,
-        date: new Date(entry.createdAt),
-        categoryName: entry.categoryName,
-        categoryIcon: entry.categoryIcon,
-      }))
+      .map((entry) => {
+        const rawGrams = (entry as any).amountGrams ?? (entry as any).grams ?? 0;
+        const grams = Number(rawGrams || 0);
+        const created = (entry as any).createdAt ?? (entry as any).created ?? null;
+        const date = created ? new Date(created) : null;
+        if (!date || Number.isNaN(grams)) return null;
+        return {
+          grams: Math.max(0, grams),
+          date,
+          categoryName: entry.categoryName,
+          categoryIcon: entry.categoryIcon,
+        } as { grams: number; date: Date; categoryName?: string; categoryIcon?: string };
+      })
+      .filter((x): x is { grams: number; date: Date; categoryName?: string; categoryIcon?: string } => x !== null)
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     const dailyMap = new Map<string, number>();
@@ -208,22 +208,22 @@ export default function StatisticsScreen() {
         ? ((currentAverage - previousAverage) / previousAverage) * 100
         : 0;
 
-    let aboveGoalDays = 0;
+    let daysWithinGoal = 0;
     for (let i = 0; i < rangeDays; i += 1) {
       const date = new Date(currentStart);
       date.setDate(currentStart.getDate() + i);
       const grams = dailyMap.get(dayKey(date)) ?? 0;
-      if (grams >= goalPerDay) aboveGoalDays += 1;
+      if (grams <= goalPerDay) daysWithinGoal += 1;
     }
-    const belowGoalDays = rangeDays - aboveGoalDays;
+    const daysOutsideGoal = rangeDays - daysWithinGoal;
     const topPercent = Math.max(
       5,
       Math.min(
         99,
         Math.round(
           100 -
-            (currentAverage / goalPerDay) * 42 -
-            (aboveGoalDays / Math.max(rangeDays, 1)) * 28,
+            (currentAverage / Math.max(goalPerDay, 1)) * 42 -
+            (daysWithinGoal / Math.max(rangeDays, 1)) * 28,
         ),
       ),
     );
@@ -339,8 +339,8 @@ export default function StatisticsScreen() {
 
     const barMax = Math.max(...barSegments.map((item) => item.grams), 1);
     const pieSlices = [
-      { label: "Abaixo da meta", value: belowGoalDays, color: "#22c55e" },
-      { label: "Acima da meta", value: aboveGoalDays, color: "#ef4444" },
+      { label: "Dentro da meta", value: daysWithinGoal, color: "#22c55e" },
+      { label: "Fora da meta", value: daysOutsideGoal, color: "#ef4444" },
     ];
     const pieTotal = pieSlices.reduce((sum, item) => sum + item.value, 0) || 1;
     const pieSize = 174;
@@ -366,8 +366,8 @@ export default function StatisticsScreen() {
       currentAverage,
       previousAverage,
       growthPercent,
-      aboveGoalDays,
-      belowGoalDays,
+      daysWithinGoal,
+      daysOutsideGoal,
       topPercent,
       barSegments,
       barMax,
@@ -377,7 +377,7 @@ export default function StatisticsScreen() {
       pieCircumference,
       pieSlices: doughnut,
     };
-  }, [entries, statsRange]);
+  }, [entries, statsRange, goalGrams]);
 
   const selectedSegment = selectedBarKey
     ? (dashboard.barSegments.find(
@@ -413,6 +413,20 @@ export default function StatisticsScreen() {
       return next;
     },
   );
+  const heroProgress = Math.min(
+    1,
+    dashboard.goalPerDay > 0 ? dashboard.currentAverage / dashboard.goalPerDay : 0,
+  );
+
+  const heroFeedback =
+    dashboard.currentAverage <= dashboard.goalPerDay
+      ? `Você está ${Math.max(0, Math.round(dashboard.goalPerDay - dashboard.currentAverage))}g abaixo da meta diária.`
+      : `Você está ${Math.max(0, Math.round(dashboard.currentAverage - dashboard.goalPerDay))}g acima da meta diária.`;
+
+  const heroFeedbackTone =
+    dashboard.currentAverage <= dashboard.goalPerDay
+      ? palette.accent
+      : palette.danger;
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
@@ -464,43 +478,36 @@ export default function StatisticsScreen() {
           borderWidth: 1,
           borderColor: palette.panelAlt,
           overflow: "hidden",
+          shadowColor: palette.cardBorder,
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.12,
+          shadowRadius: 18,
+          elevation: 6,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 18 }}>
           <View style={{ flex: 1, paddingTop: 2 }}>
-            <View
-              style={{
-                alignSelf: "flex-start",
-                backgroundColor: darkModeEnabled ? "rgba(54, 163, 255, 0.14)" : "rgba(31, 111, 178, 0.10)",
-                borderWidth: 1,
-                borderColor: darkModeEnabled ? "rgba(54, 163, 255, 0.32)" : "rgba(31, 111, 178, 0.18)",
-                borderRadius: 999,
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                marginBottom: 12,
-              }}
-            >
-              <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 }}>
-                ESTATÍSTICAS
+            <Text style={{ color: palette.textSecondary, fontSize: 12, fontWeight: "800", letterSpacing: 0.8, marginBottom: 6 }}>
+              ESTATÍSTICAS
+            </Text>
+            <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 38, fontWeight: "900", letterSpacing: -0.6 }}>
+              Seu consumo em destaque
+            </Text>
+            <Text style={{ color: palette.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
+              {heroFeedback}
+            </Text>
+
+            <View style={{ marginTop: 12, maxWidth: "85%" }}>
+              <View style={{ height: 10, backgroundColor: palette.panelAlt, borderRadius: 999, overflow: "hidden" }}>
+                <View style={{ width: `${Math.round(heroProgress * 100)}%`, height: "100%", backgroundColor: heroProgress <= 1 ? palette.accent : palette.danger }} />
+              </View>
+              <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 8 }}>
+                Meta: {dashboard.goalPerDay}g 
               </Text>
             </View>
-
-            <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 0.8, marginBottom: 6, fontWeight: "700" }}>
-              VISÃO GERAL DO CONSUMO
-            </Text>
-            <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 32, fontWeight: "900" }}>
-              {dashboard.currentAverage.toFixed(0)}g por dia
-            </Text>
-            <Text style={{ color: palette.textSecondary, marginTop: 8, fontSize: 13 }}>
-              {dashboard.growthPercent >= 0
-                ? `↑ ${dashboard.growthPercent.toFixed(0)}% vs período anterior`
-                : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}% vs período anterior`}
-            </Text>
+            
           </View>
 
-          <View style={{ width: 132, height: 132, borderRadius: 34, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.panelAlt, overflow: "hidden" }}>
-            <Image source={require("../assets/images/peixe-vermelho.png")} style={{ width: 112, height: 112 }} />
-          </View>
         </View>
       </View>
 
@@ -515,12 +522,12 @@ export default function StatisticsScreen() {
         ]}
       >
         <Text style={[styles.label, { color: palette.textSecondary }]}>
-          Média diária
+          Consumo do período
         </Text>
         <Text style={[styles.value, { color: palette.textPrimary }]}>
           {dashboard.currentAverage.toFixed(0)}g
         </Text>
-        <Text style={{ color: "#8bd14f", marginTop: 6, fontSize: 11 }}>
+        <Text style={{ color: palette.accent, marginTop: 6, fontSize: 11 }}>
           {dashboard.growthPercent >= 0
             ? `↑ ${dashboard.growthPercent.toFixed(0)}%`
             : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}%`}{" "}
@@ -544,20 +551,17 @@ export default function StatisticsScreen() {
                 paddingVertical: 9,
                 borderRadius: 999,
                 alignItems: "center",
-                backgroundColor: active
-                  ? palette.segmentBgActive
-                  : palette.segmentBg,
                 borderWidth: 1,
                 borderColor: active
-                  ? palette.segmentBorderActive
-                  : palette.segmentBorder,
+                  ? palette.accent
+                  : palette.panelAlt,
               }}
             >
               <Text
                 style={{
                   color: active
-                    ? palette.segmentTextActive
-                    : palette.segmentText,
+                    ? palette.accent
+                    : palette.textSecondary,
                   fontWeight: "700",
                   fontSize: 12,
                 }}
@@ -591,13 +595,13 @@ export default function StatisticsScreen() {
                 : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}%`,
           },
           {
-            label: "Total evitado",
+            label: "Total consumido",
             value: `${dashboard.currentTotal.toFixed(0)}g`,
             note: "período selecionado",
           },
           {
             label: "Meta atingida",
-            value: `${dashboard.aboveGoalDays}/${dashboard.rangeDays}`,
+            value: `${dashboard.daysWithinGoal}/${dashboard.rangeDays}`,
             note: "dias no alvo",
           },
           {
@@ -610,18 +614,18 @@ export default function StatisticsScreen() {
             key={card.label}
             style={{
               width: "48%",
-              backgroundColor: palette.statsPanelAlt,
+              backgroundColor: palette.panel,
               borderRadius: 18,
               padding: 12,
               marginBottom: 10,
               borderWidth: 1,
-              borderColor: palette.statsBorderAlt,
+              borderColor: palette.cardBorder,
               minHeight: 92,
             }}
           >
             <Text
               style={{
-                color: palette.statsTextMuted,
+                color: palette.textMuted,
                 marginBottom: 8,
                 fontSize: 13,
               }}
@@ -637,7 +641,7 @@ export default function StatisticsScreen() {
             >
               {card.value}
             </Text>
-            <Text style={{ color: "#8bd14f", marginTop: 6, fontSize: 11 }}>
+            <Text style={{ color: palette.accent, marginTop: 6, fontSize: 11 }}>
               {card.note}
             </Text>
           </View>
@@ -646,12 +650,12 @@ export default function StatisticsScreen() {
 
       <View
         style={{
-          backgroundColor: palette.statsPanel,
+          backgroundColor: palette.panel,
           borderRadius: 22,
           padding: 14,
           paddingRight: 20,
           borderWidth: 1,
-          borderColor: palette.statsBorder,
+          borderColor: palette.cardBorder,
           marginBottom: 12,
           overflow: "hidden",
         }}
@@ -668,7 +672,7 @@ export default function StatisticsScreen() {
         </Text>
         <Text
           style={{
-            color: palette.statsTextMuted,
+            color: palette.textMuted,
             fontSize: 12,
             marginBottom: 10,
           }}
@@ -814,11 +818,11 @@ export default function StatisticsScreen() {
 
       <View
         style={{
-          backgroundColor: palette.statsPanel,
+          backgroundColor: palette.panel,
           borderRadius: 22,
           padding: 14,
           borderWidth: 1,
-          borderColor: palette.statsBorder,
+          borderColor: palette.cardBorder,
           marginTop: 18,
           marginBottom: 24,
         }}
@@ -844,7 +848,7 @@ export default function StatisticsScreen() {
 
         <View
           style={{
-            backgroundColor: palette.segmentBg,
+            backgroundColor: palette.panel,
             borderRadius: 18,
             padding: 14,
             alignItems: "center",
@@ -864,7 +868,7 @@ export default function StatisticsScreen() {
               </Text>
               <Text
                 style={{
-                  color: palette.statsTextMuted,
+                  color: palette.textMuted,
                   fontSize: 12,
                   marginBottom: 14,
                 }}
@@ -907,7 +911,7 @@ export default function StatisticsScreen() {
                   >
                     {selectedSegment.grams.toFixed(0)}g
                   </Text>
-                  <Text style={{ color: palette.statsTextMuted, fontSize: 12 }}>
+                  <Text style={{ color: palette.textMuted, fontSize: 12 }}>
                     consumo
                   </Text>
                 </View>
@@ -934,7 +938,7 @@ export default function StatisticsScreen() {
                       />
                       <Text
                         style={{
-                          color: palette.statsTextSubtle,
+                          color: palette.textSecondary,
                           fontSize: 12,
                           flex: 1,
                         }}
@@ -951,7 +955,7 @@ export default function StatisticsScreen() {
                 ) : (
                   <Text
                     style={{
-                      color: palette.statsTextMuted,
+                      color: palette.textMuted,
                       fontSize: 12,
                       textAlign: "center",
                     }}
@@ -964,7 +968,7 @@ export default function StatisticsScreen() {
           ) : (
             <Text
               style={{
-                color: palette.statsTextMuted,
+                color: palette.textMuted,
                 fontSize: 12,
                 textAlign: "center",
               }}

@@ -14,10 +14,10 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   Timestamp,
   setDoc,
-  updateDoc,
 } from "firebase/firestore";
 import { auth, db } from "../service/firebaseConfig";
 import { recordAuditEvent } from "./auditLogger";
@@ -28,6 +28,7 @@ export type PlasticEntry = {
   createdAt: string;
   categoryName?: string;
   categoryIcon?: string;
+  editCount?: number;
 };
 
 type PlasticConsumptionContextValue = {
@@ -55,6 +56,7 @@ function normalizeEntry(entry: PlasticEntry & { createdAt?: unknown }): PlasticE
   return {
     ...entry,
     amountGrams: Number(entry.amountGrams || 0),
+    editCount: Number(entry.editCount || 0),
     createdAt:
       typeof createdAt === "string"
         ? createdAt
@@ -69,6 +71,7 @@ export function PlasticConsumptionProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const MAX_EDIT_COUNT = 3;
   const [entries, setEntries] = useState<PlasticEntry[]>([]);
   const [goalGrams, setGoalGrams] = useState<number | null>(null);
   const currentUidRef = useRef<string | null>(auth.currentUser?.uid || null);
@@ -192,6 +195,7 @@ export function PlasticConsumptionProvider({
       createdAt: serverTimestamp(),
       categoryName: category?.name || null,
       categoryIcon: category?.icon || null,
+      editCount: 0,
     });
     void recordAuditEvent({
       eventType: "create",
@@ -211,9 +215,27 @@ export function PlasticConsumptionProvider({
     const uid = currentUidRef.current;
     if (!uid) return;
 
-    await updateDoc(doc(db, "users", uid, "plasticConsumptionEntries", id), {
-      amountGrams: Number(payload.amountGrams.toFixed(2)),
-      categoryName: payload.categoryName || null,
+    const entryRef = doc(db, "users", uid, "plasticConsumptionEntries", id);
+
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(entryRef);
+      if (!snapshot.exists()) {
+        throw new Error("not-found");
+      }
+
+      const currentEditCount = Number(snapshot.data().editCount || 0);
+      if (currentEditCount >= MAX_EDIT_COUNT) {
+        const error = new Error("edit-limit-reached");
+        (error as any).code = "edit-limit-reached";
+        throw error;
+      }
+
+      transaction.update(entryRef, {
+        amountGrams: Number(payload.amountGrams.toFixed(2)),
+        categoryName: payload.categoryName || null,
+        editCount: currentEditCount + 1,
+        updatedAt: serverTimestamp(),
+      });
     });
     void recordAuditEvent({
       eventType: "update",
@@ -222,6 +244,7 @@ export function PlasticConsumptionProvider({
       payload: {
         amountGrams: Number(payload.amountGrams.toFixed(2)),
         categoryName: payload.categoryName || null,
+        editCount: 1,
       },
     });
   };
