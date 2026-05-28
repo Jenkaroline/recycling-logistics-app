@@ -28,6 +28,12 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
     "auth/user-disabled": "Esta conta foi desativada.",
     "auth/popup-closed-by-user": "A ação foi cancelada pelo usuário.",
     "auth/cancelled-popup-request": "Ação cancelada.",
+    "permission-denied": "Você não tem permissão para realizar essa ação.",
+    "not-found": "Não encontramos os dados necessários para concluir essa ação.",
+    "unavailable": "O serviço está temporariamente indisponível. Tente novamente em instantes.",
+    "deadline-exceeded": "A operação demorou demais. Tente novamente.",
+    "already-exists": "Esse item já existe.",
+    "edit-limit-reached": "Este registro já atingiu o limite de 3 edições.",
   };
 
   if (code && map[code]) return map[code];
@@ -56,7 +62,6 @@ export function translateFirebaseError(error: FirebaseLikeError | any): string {
   if (/requires recent login/i.test(message))
     return "Re-autentique-se e tente novamente para realizar esta ação.";
 
-  // Fallback: avoid exposing raw Firebase internals; show a friendly generic message
-  const cleaned = message.replace(/^Firebase:\s*/i, "").trim();
-  return cleaned ? cleaned : "Ocorreu um erro. Tente novamente mais tarde.";
+  // Fallback: never expose raw Firebase internals to the UI.
+  return "Não foi possível concluir a ação. Tente novamente mais tarde.";
 }

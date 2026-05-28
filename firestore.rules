@@ -9,16 +9,42 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function editCount(data) {
+      return data.editCount is int ? data.editCount : 0;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update, delete: if isOwner(userId);
 
       match /recyclingActions/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.editCount == 0;
+        allow update: if isOwner(userId)
+          && editCount(resource.data) < 3
+          && request.resource.data.editCount == editCount(resource.data) + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "type",
+            "notes",
+            "editCount",
+            "updatedAt"
+          ]);
+        allow delete: if isOwner(userId);
       }
 
       match /plasticConsumptionEntries/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.editCount == 0;
+        allow update: if isOwner(userId)
+          && editCount(resource.data) < 3
+          && request.resource.data.editCount == editCount(resource.data) + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "amountGrams",
+            "categoryName",
+            "editCount",
+            "updatedAt"
+          ]);
+        allow delete: if isOwner(userId);
       }
 
       match /plasticConsumptionMeta/{docId} {
@@ -26,11 +52,27 @@ service cloud.firestore {
       }
 
       match /competitionGroups/{docId} {
-        allow read, write: if isOwner(userId);
+          allow read, write: if isOwner(userId);
+
+          match /chatMessages/{msgId} {
+            allow read: if signedIn();
+            allow create: if signedIn() && request.resource.data.authorId == request.auth.uid && request.resource.data.groupId == docId;
+            allow update: if signedIn() && (request.auth.uid == resource.data.authorId || isOwner(userId));
+            allow delete: if signedIn() && (request.auth.uid == resource.data.authorId || isOwner(userId));
+          }
       }
 
       match /competitionMeta/{docId} {
         allow read, write: if isOwner(userId);
+      }
+
+      match /competitionNotifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if signedIn()
+          && request.resource.data.recipientUid == userId
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.type == "member-removed";
+        allow update, delete: if isOwner(userId);
       }
 
       match /competitionChatMessages/{docId} {
@@ -52,6 +94,20 @@ service cloud.firestore {
       match /followers/{docId} {
         allow read, write: if isOwner(userId);
       }
+
+      match /groupInvitationsSent/{inviteId} {
+        allow read: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.recipientUid);
+        allow create: if signedIn() && request.auth.uid == userId && request.resource.data.ownerId == request.auth.uid && request.resource.data.groupId is string;
+        allow update: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.recipientUid);
+        allow delete: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId);
+      }
+
+      match /groupInvitationsReceived/{inviteId} {
+        allow read: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.recipientUid);
+        allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId && request.resource.data.recipientUid == userId && request.resource.data.groupId is string;
+        allow update: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.recipientUid);
+        allow delete: if signedIn() && (request.auth.uid == userId || request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.recipientUid);
+      }
     }
 
     match /posts/{postId} {
@@ -69,6 +125,63 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
         allow update, delete: if signedIn() && request.auth.uid == resource.data.userId;
+      }
+    }
+
+    // Top-level group chat collection to avoid owner-scoped permission issues
+    match /groupChatMessages/{groupId} {
+      match /messages/{msgId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.authorId == request.auth.uid && request.resource.data.groupId == groupId;
+        allow update: if signedIn() && request.auth.uid == resource.data.authorId;
+        allow delete: if signedIn() && (request.auth.uid == resource.data.authorId);
+      }
+    }
+
+    // Public groups collection to store shared group metadata (image, name, owner)
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == request.resource.data.ownerId && request.resource.data.ownerId is string;
+      // Only the recorded owner may update or delete the public group document
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /history/{historyId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.actorId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // Group notifications (contests / invalidations)
+    match /groupNotifications/{groupId} {
+      match /items/{itemId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.actorId == request.auth.uid;
+        allow update: if signedIn() && request.auth.uid == resource.data.actorId;
+        allow delete: if signedIn() && request.auth.uid == resource.data.actorId;
+      }
+    }
+
+    match /groupRecyclingActions/{groupId} {
+      match /entries/{docId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.authorId == request.auth.uid && request.resource.data.groupId == groupId;
+        allow update: if signedIn() && (
+          request.auth.uid == resource.data.authorId ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "contestCount",
+            "contestPenaltyApplied",
+            "contestPenaltyAppliedAt",
+            "contestReasons"
+          ])
+        );
+        allow delete: if signedIn() && request.auth.uid == resource.data.authorId;
+
+        match /contests/{contestId} {
+          allow read: if signedIn();
+          allow create: if signedIn() && request.resource.data.groupId == groupId && request.resource.data.entryId == docId;
+          allow update, delete: if signedIn() && request.auth.uid == resource.data.authorId;
+        }
       }
     }
 

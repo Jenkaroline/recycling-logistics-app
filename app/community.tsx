@@ -25,6 +25,7 @@ export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
   const { followingFeedPosts, currentProfile, loading, reactToPost } =
     useSocial();
   const { darkModeEnabled } = useThemePreference();
@@ -66,7 +67,7 @@ export default function CommunityScreen() {
         <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <TouchableOpacity
-            onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+            onPress={() => drawerNavigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
             style={{
               width: 44,
               height: 44,

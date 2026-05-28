@@ -1,7 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { Image } from "expo-image";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import React, { useState } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
@@ -17,7 +17,7 @@ type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   Main: undefined;
-  VerifyEmail: undefined;
+  VerifyEmail: { message?: string; email?: string; flow?: "register" | "email-change" } | undefined;
   ResetPassword: undefined;
 };
 
@@ -81,8 +81,11 @@ export default function LoginScreen() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (userCredential.user && !userCredential.user.emailVerified) {
-        await signOut(auth);
-        setError("Usuário não encontrado ou credenciais inválidas.");
+        navigation.navigate("VerifyEmail", {
+          message: "Sua conta ainda não foi verificada. Confira seu e-mail para liberar o acesso.",
+          email: userCredential.user.email || sanitize(email),
+          flow: "register",
+        });
         return;
       }
       navigation.navigate("Main");

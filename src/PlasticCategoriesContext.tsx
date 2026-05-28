@@ -135,20 +135,30 @@ export function PlasticCategoriesProvider({
         orderBy("createdAt", "asc"),
       );
 
-      unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-        const customCategories = snapshot.docs.map((categorySnap) => {
-          const data = categorySnap.data() as Partial<PlasticCategory>;
-          return {
-            id: categorySnap.id,
-            name: data.name || "",
-            weightGrams: Number(data.weightGrams || 0),
-            icon: data.icon || "shape-outline",
-            isCustom: true,
-          };
-        });
+      unsubscribeCategories = onSnapshot(
+        categoriesQuery,
+        (snapshot) => {
+          const customCategories = snapshot.docs.map((categorySnap) => {
+            const data = categorySnap.data() as Partial<PlasticCategory>;
+            return {
+              id: categorySnap.id,
+              name: data.name || "",
+              weightGrams: Number(data.weightGrams || 0),
+              icon: data.icon || "shape-outline",
+              isCustom: true,
+            };
+          });
 
-        setCategories([...DEFAULT_CATEGORIES, ...customCategories]);
-      });
+          setCategories([...DEFAULT_CATEGORIES, ...customCategories]);
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setCategories(DEFAULT_CATEGORIES);
+            return;
+          }
+          console.warn("Plastic categories listener failed:", error);
+        },
+      );
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {

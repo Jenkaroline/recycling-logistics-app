@@ -25,6 +25,8 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString("pt-BR");
 }
 
+const MAX_EDIT_COUNT = 3;
+
 export default function RecordsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -42,6 +44,7 @@ export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingAmount, setEditingAmount] = useState("");
@@ -137,7 +140,13 @@ export default function RecordsScreen() {
 
   const fullName = currentProfile?.username || "Seus registros";
 
-  const beginEdit = (id: string, amountGrams: number, categoryName?: string) => {
+  const canEditRecord = (editCount?: number) => Number(editCount || 0) < MAX_EDIT_COUNT;
+
+  const beginEdit = (id: string, amountGrams: number, categoryName?: string, editCount?: number) => {
+    if (!canEditRecord(editCount)) {
+      Alert.alert("Limite atingido", "Este registro já foi editado 3 vezes e não pode ser alterado novamente.");
+      return;
+    }
     setEditingId(id);
     setEditingAmount(String(amountGrams));
     setEditingCategory(categoryName || "");
@@ -287,7 +296,7 @@ export default function RecordsScreen() {
         <View style={{ height: 64 - insets.top - 10, paddingHorizontal: 12, justifyContent: "center" }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <TouchableOpacity
-              onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+              onPress={() => drawerNavigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
               style={{
                 width: 44,
                 height: 44,
@@ -302,7 +311,7 @@ export default function RecordsScreen() {
               <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
             </TouchableOpacity>
 
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {/* <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <TouchableOpacity
                 onPress={() => horizontalRef.current?.scrollTo({ x: 0, animated: true })}
                 style={{
@@ -321,7 +330,7 @@ export default function RecordsScreen() {
                   backgroundColor: recordsPage === 1 ? palette.accent : palette.panelAlt,
                 }}
               />
-            </View>
+            </View> */}
 
             <TouchableOpacity
               onPress={() => (navigation as any).navigate("Notificações")}
@@ -479,12 +488,28 @@ export default function RecordsScreen() {
                           <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 15 }}>{item.categoryName || "Sem categoria"}</Text>
                         </View>
                         <Text style={{ color: palette.textMuted, fontSize: 12 }}>{formatDate(item.createdAt)}</Text>
+                        <Text style={{ color: palette.textMuted, fontSize: 11, marginTop: 4 }}>
+                          Edições: {Number(item.editCount || 0)}/{MAX_EDIT_COUNT}
+                        </Text>
                       </View>
                       <Text style={{ color: palette.accent, fontWeight: "900", fontSize: 20 }}>{item.amountGrams} g</Text>
                     </View>
 
                     <View style={{ flexDirection: "row", marginTop: 14 }}>
-                      <TouchableOpacity onPress={() => beginEdit(item.id, item.amountGrams, item.categoryName)} style={{ backgroundColor: palette.accentSoft, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: palette.accentLine, marginRight: 8 }}>
+                      <TouchableOpacity
+                        onPress={() => beginEdit(item.id, item.amountGrams, item.categoryName, item.editCount)}
+                        disabled={!canEditRecord(item.editCount)}
+                        style={{
+                          backgroundColor: palette.accentSoft,
+                          borderRadius: 14,
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                          borderWidth: 1,
+                          borderColor: palette.accentLine,
+                          marginRight: 8,
+                          opacity: canEditRecord(item.editCount) ? 1 : 0.45,
+                        }}
+                      >
                         <Text style={{ color: palette.accent, fontWeight: "800" }}>Editar</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => confirmDelete(item.id)} style={{ backgroundColor: palette.dangerSoft, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: darkModeEnabled ? "rgba(255,139,148,0.35)" : "rgba(179,49,77,0.18)" }}>
@@ -497,7 +522,7 @@ export default function RecordsScreen() {
             </View>
           </ScrollView>
         </View>
-
+{/* 
         <View style={{ width }}>
           <ScrollView
             style={{ flex: 1, backgroundColor: palette.bg }}
@@ -584,7 +609,7 @@ export default function RecordsScreen() {
               )}
             </View>
           </ScrollView>
-        </View>
+        </View> */}
       </ScrollView>
 
       <Modal visible={editingId !== null} transparent animationType="slide" onRequestClose={closeEdit}>

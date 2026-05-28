@@ -5,7 +5,7 @@ import {
   DrawerItem,
 } from "@react-navigation/drawer";
 import { DrawerActions } from "@react-navigation/native";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, reload } from "firebase/auth";
 import { useSocial } from "../src/SocialContext";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { Image } from "react-native";
@@ -34,13 +34,12 @@ import RegisterScreen from "./auth/register";
 import VerifyEmailScreen from "./auth/verifyEmail";
 import ResetPasswordScreen from "./auth/resetPassword";
 import ResetPasswordConfirmScreen from "./auth/resetPasswordConfirm";
-import MeusGruposScreen from "./myGroups";
+import MeusGruposScreen from "./myGroups.tsx";
 import HomeScreen from "./home";
 import RecordsScreen from "./records";
-import NotificationsScreen from "./notifications";
+import NotificationsScreen from "../src/NotificationsScreen";
 import SettingsScreen from "./settings";
 import StatisticsScreen from "./statistics";
-
 const Drawer = createDrawerNavigator();
 const Stack = createNativeStackNavigator();
 
@@ -152,6 +151,15 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           style={{ borderRadius: 10, marginBottom: 6 }}
           icon={({ color, size }) => <Ionicons name="map-outline" size={size} color={color || palette.iconInactive} />}
         />
+        <DrawerItem
+          label="Estatísticas"
+          onPress={() => (props.navigation as any).navigate("Estatísticas")}
+          activeTintColor={palette.textAccent}
+          inactiveTintColor={palette.iconInactive}
+          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
+          style={{ borderRadius: 10, marginBottom: 6 }}
+          icon={({ color, size }) => <Ionicons name="stats-chart-outline" size={size} color={color || palette.iconInactive} />}
+        />
       </View>
 
       <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: palette.header, paddingTop: 8, paddingHorizontal: 8 }}>
@@ -173,16 +181,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
           style={{ borderRadius: 10, marginBottom: 6 }}
           icon={({ color, size }) => <Ionicons name="notifications-outline" size={size} color={color || palette.iconInactive} />}
-        />
-
-        <DrawerItem
-          label="Configurações"
-          onPress={() => openSettings({ section: undefined })}
-          activeTintColor={palette.textAccent}
-          inactiveTintColor={palette.iconInactive}
-          labelStyle={{ color: palette.textPrimary, fontSize: 15, fontWeight: "700" }}
-          style={{ borderRadius: 10, marginBottom: 6 }}
-          icon={({ color, size }) => <Ionicons name="settings-outline" size={size} color={color || palette.iconInactive} />}
         />
 
         <DrawerItem
@@ -238,6 +236,7 @@ function AppDrawer() {
 
   return (
     <Drawer.Navigator
+      id="MainDrawer"
       initialRouteName="Home"
       screenOptions={{
         headerShown: false,
@@ -296,20 +295,68 @@ function AppDrawer() {
   );
 }
 
-function AuthenticatedApp() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
-    </Stack.Navigator>
-  );
-}
+function AppGate() {
+  const [currentUser, setCurrentUser] = React.useState(auth.currentUser);
+  const [authReady, setAuthReady] = React.useState(false);
 
-function AuthScreens() {
+  React.useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          await reload(user);
+        } catch {
+          // keep the current snapshot if reload fails
+        }
+        setCurrentUser(auth.currentUser ?? user);
+      } else {
+        setCurrentUser(null);
+      }
+      setAuthReady(true);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  if (!authReady) {
+    return null;
+  }
+
+  const isAuthenticated = Boolean(currentUser);
+  const isVerified = Boolean(currentUser?.emailVerified);
+
+  if (!isAuthenticated) {
+    return (
+      <Stack.Navigator key="auth" screenOptions={{ headerShown: false }} initialRouteName="Login">
+        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+        <Stack.Screen
+          name="ResetPasswordConfirm"
+          component={ResetPasswordConfirmScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      </Stack.Navigator>
+    );
+  }
+
+  if (!isVerified) {
+    return (
+      <Stack.Navigator key="verify" screenOptions={{ headerShown: false }} initialRouteName="VerifyEmail">
+        <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+      </Stack.Navigator>
+    );
+  }
+
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator key="main" screenOptions={{ headerShown: false }} initialRouteName="Main">
+      <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="ResetPasswordConfirm"
@@ -327,22 +374,11 @@ export default function MainNavigator() {
         <PlasticConsumptionProvider>
           <RecyclingProvider>
             <RecyclingTypesProvider>
-              <RecyclingCompetitionProvider>
-                <SocialProvider>
-                  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Login">
-                    <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
-                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
-                    <Stack.Screen
-                      name="ResetPasswordConfirm"
-                      component={ResetPasswordConfirmScreen}
-                      options={{ headerShown: false }}
-                    />
-                    <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
-                  </Stack.Navigator>
-                </SocialProvider>
-              </RecyclingCompetitionProvider>
+              <SocialProvider>
+                <RecyclingCompetitionProvider>
+                  <AppGate />
+                </RecyclingCompetitionProvider>
+              </SocialProvider>
             </RecyclingTypesProvider>
           </RecyclingProvider>
         </PlasticConsumptionProvider>

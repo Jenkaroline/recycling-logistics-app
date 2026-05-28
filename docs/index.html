@@ -30,7 +30,7 @@
         if (mode === 'resetpassword') {
           return `${base}/reset/?${params.toString()}`;
         }
-        if (mode === 'verifyemail') {
+        if (mode === 'verifyemail' || mode === 'verifyandchangeemail') {
           return `${base}/verify/?${params.toString()}`;
         }
         return `${base}/`;

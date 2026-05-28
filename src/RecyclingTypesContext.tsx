@@ -102,23 +102,33 @@ export function RecyclingTypesProvider({ children }: { children: React.ReactNode
         orderBy("createdAt", "asc"),
       );
 
-      unsubscribeTypes = onSnapshot(typesQuery, (snapshot) => {
-        const customTypes: RecyclingType[] = snapshot.docs.map((typeSnap) => {
-          const data = typeSnap.data() as Partial<RecyclingType>;
-          const difficulty = data.difficulty || "medio";
-          return {
-            id: typeSnap.id,
-            type: data.type || "",
-            icon: data.icon || "recycle",
-            hint: data.hint,
-            isCustom: true,
-            difficulty,
-            xp: Number(data.xp || XP_BY_DIFFICULTY[difficulty]),
-          };
-        });
+      unsubscribeTypes = onSnapshot(
+        typesQuery,
+        (snapshot) => {
+          const customTypes: RecyclingType[] = snapshot.docs.map((typeSnap) => {
+            const data = typeSnap.data() as Partial<RecyclingType>;
+            const difficulty = data.difficulty || "medio";
+            return {
+              id: typeSnap.id,
+              type: data.type || "",
+              icon: data.icon || "recycle",
+              hint: data.hint,
+              isCustom: true,
+              difficulty,
+              xp: Number(data.xp || XP_BY_DIFFICULTY[difficulty]),
+            };
+          });
 
-        setTypes([...DEFAULT_TYPES, ...customTypes]);
-      });
+          setTypes([...DEFAULT_TYPES, ...customTypes]);
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setTypes(DEFAULT_TYPES);
+            return;
+          }
+          console.warn("Recycling types listener failed:", error);
+        },
+      );
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {

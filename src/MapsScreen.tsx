@@ -225,7 +225,6 @@ const COLLECTION_POINTS: CollectionPoint[] = [
 
 const NEARBY_DISTANCE_KM = 80;
 const POINTS_CACHE_KEY = "@maps/nearbyPointsCache-v1";
-const LOCATION_PREF_KEY = "@settings/locationEnabled";
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -495,7 +494,6 @@ export default function MapsScreen() {
   const drawerOpen = drawerStatus === "open";
   const { darkModeEnabled } = useThemePreference();
   const colors = darkModeEnabled ? COLORS : LIGHT_COLORS;
-  const [locationSharingEnabled, setLocationSharingEnabled] = useState(true);
   const [permissionGranted, setPermissionGranted] = useState<boolean | null>(
     null,
   );
@@ -543,12 +541,11 @@ export default function MapsScreen() {
     setError("");
 
     try {
-      const savedPreference = await AsyncStorage.getItem(LOCATION_PREF_KEY);
-      const isLocationEnabled = savedPreference !== "false";
-      setLocationSharingEnabled(isLocationEnabled);
+      const permission = await Location.getForegroundPermissionsAsync();
 
-      if (!isLocationEnabled) {
+      if (permission.status !== "granted") {
         setPermissionGranted(false);
+
         setUserCoords(null);
         setRegion(DEFAULT_REGION);
         setPointDetails(null);
@@ -582,18 +579,6 @@ export default function MapsScreen() {
           setIsSearching(false);
         }
         if (isLatestRequest()) {
-          setIsSyncing(false);
-        }
-        return;
-      }
-
-      const permission = await Location.requestForegroundPermissionsAsync();
-
-      if (permission.status !== "granted") {
-        if (isLatestRequest()) {
-          setPermissionGranted(false);
-          setError("Permissão de localização negada.");
-          setIsSearching(false);
           setIsSyncing(false);
         }
         return;
@@ -785,19 +770,6 @@ export default function MapsScreen() {
     }
   }, [syncNearbyPoints]);
 
-  const permissionText = useMemo(() => {
-    if (!locationSharingEnabled) {
-      return "Localização desativada. Mostrando pontos de reciclagem genéricos.";
-    }
-    if (permissionGranted === null) {
-      return "Solicitando permissão de localização...";
-    }
-    if (!permissionGranted) {
-      return "Permita sua localização para mostrar ecopontos próximos.";
-    }
-    return "Mostrando ecopontos próximos da sua posição atual.";
-  }, [locationSharingEnabled, permissionGranted]);
-
   const handlePointSelect = useCallback(
     (point: CollectionPoint) => {
       const distanceFromUserKm = userCoords
@@ -864,6 +836,39 @@ export default function MapsScreen() {
     [userCoords],
   );
 
+  const locationStatus = useMemo(() => {
+    if (permissionGranted && userCoords) {
+      return {
+        label: "Usando sua localização atual",
+        hint: "Os ecopontos são filtrados pela sua posição.",
+        icon: "location-outline" as const,
+        background: darkModeEnabled ? "rgba(15, 211, 182, 0.14)" : "rgba(27, 143, 90, 0.11)",
+        border: colors.accent,
+        text: colors.recycleAccent,
+      };
+    }
+
+    if (permissionGranted) {
+      return {
+        label: "Permissão liberada, sem posição capturada",
+        hint: "Mostrando pontos gerais até a leitura concluir.",
+        icon: "time-outline" as const,
+        background: darkModeEnabled ? "rgba(54, 163, 255, 0.12)" : "rgba(31, 111, 178, 0.08)",
+        border: colors.accentTextStrong,
+        text: colors.accentTextStrong,
+      };
+    }
+
+    return {
+      label: "Localização desativada",
+      hint: "Exibindo pontos gerais. Autorize o acesso à localização para ver um resultado mais preciso.",
+      icon: "close-circle-outline" as const,
+      background: darkModeEnabled ? "rgba(255, 139, 148, 0.12)" : "rgba(179, 49, 77, 0.08)",
+      border: colors.danger,
+      text: colors.danger,
+    };
+  }, [colors, darkModeEnabled, isSyncing, permissionGranted, userCoords]);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 64, zIndex: 40 }} pointerEvents="box-none">
@@ -921,11 +926,16 @@ export default function MapsScreen() {
         style={{
           marginBottom: 20,
           backgroundColor: colors.panel,
-          borderRadius: 28,
+          borderRadius: 30,
           padding: 18,
           borderWidth: 1,
           borderColor: colors.panelAlt,
           overflow: "hidden",
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: darkModeEnabled ? 0.18 : 0.08,
+          shadowRadius: 20,
+          elevation: 5,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
@@ -947,29 +957,71 @@ export default function MapsScreen() {
               </Text>
             </View>
 
+            <Text style={[styles.title, { color: colors.heading, marginBottom: 6, width: "90%" }]}>Descubra ecopontos perto de você</Text>
 
-          <View style={styles.mapHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.title, { color: colors.recycleAccent }]}>Ecopontos <Text style={[{ color: colors.heading }]}>próximos de você</Text></Text>
-              {nearbyPoints.length > 0 ? (
-                <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: 13 }]}>Encontramos {nearbyPoints.length} pontos de reciclagem próximos de você.</Text>
-              ) : isSearching ? (
-                <View>
-                  <View style={styles.loadingInlineRow}>
-                    <ActivityIndicator size="small" color={colors.accent} />
-                    <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: 13, marginBottom: 0, marginLeft: 8 }]}>Encontrando pontos de reciclagem...</Text>
-                  </View>
-                  {isSlowWait ? (
-                    <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: 12, marginTop: 6 }]}>Isso pode demorar um pouco — obrigado pela paciência.</Text>
-                  ) : null}
-                </View>
-              ) : (
-                <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: 13 }]}>Nenhum ponto encontrado ainda.</Text>
-              )}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 999,
+                  backgroundColor: locationStatus.background,
+                  borderWidth: 1,
+                  borderColor: locationStatus.border,
+                }}
+              >
+                <Ionicons name={locationStatus.icon as React.ComponentProps<typeof Ionicons>["name"]} size={14} color={locationStatus.text} />
+                <Text style={{ color: locationStatus.text, fontSize: 12, fontWeight: "700" }}>
+                  {locationStatus.label}
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 999,
+                  backgroundColor: colors.panelAlt,
+                  borderWidth: 1,
+                  borderColor: colors.panelAlt,
+                }}
+              >
+                <MaterialCommunityIcons name="map-marker-radius-outline" size={14} color={colors.textSecondary} />
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: "700" }}>
+                  {nearbyPoints.length > 0 ? `${nearbyPoints.length} pontos encontrados` : "Buscando pontos próximos"}
+                </Text>
+              </View>
             </View>
-          </View>
 
-        <MapView onLayout={(e) => setMapLayout({ y: e.nativeEvent.layout.y, height: e.nativeEvent.layout.height })} style={[styles.map, { borderColor: colors.panelAlt, marginBottom: 18 }]} region={region}>
+            <Text style={{ color: colors.textSoft, fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
+              {locationStatus.hint}
+            </Text>
+
+         
+          </View>
+        </View>
+
+        <View
+          style={{
+            borderRadius: 22,
+            overflow: "hidden",
+            borderWidth: 1,
+            borderColor: colors.panelAlt,
+            marginTop: 4,
+            marginBottom: 18,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: darkModeEnabled ? 0.18 : 0.07,
+            shadowRadius: 14,
+            elevation: 4,
+          }}
+        >
+          <MapView onLayout={(e) => setMapLayout({ y: e.nativeEvent.layout.y, height: e.nativeEvent.layout.height })} style={[styles.map, { borderColor: colors.panelAlt, marginBottom: 0 }]} region={region}>
         {userCoords ? (
           <Marker
             coordinate={{ latitude: userCoords.latitude, longitude: userCoords.longitude }}
@@ -988,7 +1040,8 @@ export default function MapsScreen() {
             pinColor={pointDetails?.id === point.id ? colors.accent : "#27ae85"}
           />
         ))}
-      </MapView>
+          </MapView>
+        </View>
 
             {pointDetails ? (
         <View
@@ -1027,11 +1080,7 @@ export default function MapsScreen() {
           </Button>
         </View>
       ) : null}
-
-
-          </View>
         </View>
-      </View>
 
       </ScrollView>
     </View>

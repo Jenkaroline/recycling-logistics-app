@@ -1,20 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useNavigation, useRoute, DrawerActions } from "@react-navigation/native";
 import {
   deleteUser,
   EmailAuthProvider,
   reauthenticateWithCredential,
-  updateEmail,
+  signOut,
+  verifyBeforeUpdateEmail,
   updatePassword,
   updateProfile,
 } from "firebase/auth";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { setDoc, doc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  AppState,
   Alert,
+  Linking,
   Image,
   Modal,
   ScrollView,
@@ -26,9 +29,8 @@ import {
 } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useDrawerStatus } from "@react-navigation/drawer";
 import Svg, { Circle, Defs, G, Line, LinearGradient, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { auth, storage } from "../service/firebaseConfig";
+import { auth, db } from "../service/firebaseConfig";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { useSocial } from "../src/SocialContext";
@@ -48,8 +50,6 @@ type BarSegment = {
   end: Date;
   categories: Array<{ label: string; value: number; icon?: string }>;
 };
-
-const LOCATION_PREF_KEY = "@settings/locationEnabled";
 
 function startOfWeek(date: Date) {
   const copy = new Date(date);
@@ -112,32 +112,14 @@ function trendMessage(tone: ReturnType<typeof trendTone>) {
   return "Ritmo estável. Sem drama, sem susto, sem novela.";
 }
 
-function fileUriToBlob(uri: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 400) {
-        resolve(xhr.response as Blob);
-        return;
-      }
-      reject(new Error(`Falha ao carregar arquivo local (${xhr.status}).`));
-    };
-    xhr.onerror = () =>
-      reject(new Error("Não foi possível ler o arquivo local da imagem."));
-    xhr.responseType = "blob";
-    xhr.open("GET", uri, true);
-    xhr.send();
-  });
-}
-
 export default function SettingsScreen() {
   const { entries, totalGrams } = usePlasticConsumption();
   const { currentProfile, myPosts, updateProfilePhoto } = useSocial();
   const { darkModeEnabled, setDarkModeEnabled } = useThemePreference();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const drawerStatus = useDrawerStatus();
-  const drawerOpen = drawerStatus === "open";
+  const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation.getParent?.();
+  const drawerOpen = false;
   const palette = darkModeEnabled
     ? {
         bg: "#061526",
@@ -210,11 +192,48 @@ export default function SettingsScreen() {
   const [loadingAccount, setLoadingAccount] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const [newUsername, setNewUsername] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [locationEnabled, setLocationEnabled] = useState(true);
+  const [settingsDropdownOpen, setSettingsDropdownOpen] = useState(false);
+  const [settingsOption, setSettingsOption] = useState<"email" | "username" | "password" | null>(null);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
+
+  const stripSpaces = (value: string) => value.replace(/\s+/g, "");
+
+  const sanitizePassword = (s: string) => s || "";
+
+  useEffect(() => {
+    setAvatarPreviewUrl(currentProfile?.avatarUrl || "");
+  }, [currentProfile?.avatarUrl]);
+
+  const isStrongPassword = (s: string) => {
+    return /(?=.{8,})(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(s);
+  };
+
+  const passwordRequirementsStatus = (s: string) => {
+    return {
+      length: (s || "").length >= 8,
+      upper: /[A-Z]/.test(s || ""),
+      lower: /[a-z]/.test(s || ""),
+      number: /\d/.test(s || ""),
+      special: /[^A-Za-z0-9]/.test(s || ""),
+    };
+  };
+
+  const getMissingPasswordRequirements = (s: string) => {
+    const requirements = passwordRequirementsStatus(s);
+    const missing: string[] = [];
+    if (!requirements.length) missing.push("pelo menos 8 caracteres");
+    if (!requirements.upper) missing.push("uma letra maiúscula");
+    if (!requirements.lower) missing.push("uma letra minúscula");
+    if (!requirements.number) missing.push("um número");
+    if (!requirements.special) missing.push("um caractere especial");
+    return missing;
+  };
   const consumedSectionRef = React.useRef<string | null>(null);
   const barPositiveColor = darkModeEnabled ? "#2cb67d" : "#17603f";
   const barNegativeColor = darkModeEnabled ? "#ef4444" : "#a61d24";
@@ -227,6 +246,98 @@ export default function SettingsScreen() {
   const closeActivePanel = React.useCallback(() => {
     setActivePanel("none");
   }, []);
+
+  const openSystemSettings = React.useCallback(async () => {
+    try {
+      await Linking.openSettings();
+    } catch {
+      Alert.alert("Ajustes indisponíveis", "Não foi possível abrir os ajustes do dispositivo agora.");
+    }
+  }, []);
+
+  const refreshPermissions = React.useCallback(async () => {
+    try {
+      const [cameraPermission, locationPermission] = await Promise.all([
+        ImagePicker.getCameraPermissionsAsync(),
+        Location.getForegroundPermissionsAsync(),
+      ]);
+
+      setCameraPermissionGranted(cameraPermission.granted);
+      setLocationPermissionGranted(locationPermission.granted);
+    } catch {
+      setCameraPermissionGranted(false);
+      setLocationPermissionGranted(false);
+    }
+  }, []);
+
+  const requestCameraPermission = React.useCallback(async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    setCameraPermissionGranted(permission.granted);
+    if (!permission.granted) {
+      Alert.alert(
+        "Permissão de câmera",
+        "A câmera foi negada. Você pode habilitá-la nos ajustes do dispositivo.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Abrir ajustes", onPress: openSystemSettings },
+        ],
+      );
+    }
+  }, [openSystemSettings]);
+
+  const requestLocationPermission = React.useCallback(async () => {
+    const permission = await Location.requestForegroundPermissionsAsync();
+    setLocationPermissionGranted(permission.granted);
+    if (!permission.granted) {
+      Alert.alert(
+        "Permissão de localização",
+        "A localização foi negada. Você pode habilitá-la nos ajustes do dispositivo.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Abrir ajustes", onPress: openSystemSettings },
+        ],
+      );
+    }
+  }, [openSystemSettings]);
+
+  const handlePermissionToggle = React.useCallback(
+    async (permissionType: "camera" | "location", enabled: boolean) => {
+      if (!enabled) {
+        Alert.alert(
+          "Gerenciar no sistema",
+          "Essa permissão é controlada pelos ajustes do dispositivo. Abra os ajustes para desativá-la ou revogá-la.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Abrir ajustes", onPress: openSystemSettings },
+          ],
+        );
+        return;
+      }
+
+      if (permissionType === "camera") {
+        await requestCameraPermission();
+        return;
+      }
+
+      if (permissionType === "location") {
+        await requestLocationPermission();
+        return;
+      }
+    },
+    [openSystemSettings, requestCameraPermission, requestLocationPermission],
+  );
+
+  useEffect(() => {
+    void refreshPermissions();
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshPermissions();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [refreshPermissions]);
 
   React.useEffect(() => {
     const section = route.params?.section;
@@ -243,36 +354,12 @@ export default function SettingsScreen() {
     }
   }, [route.params?.section]);
 
-  React.useEffect(() => {
-    let mounted = true;
-
-    const loadLocationPreference = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(LOCATION_PREF_KEY);
-        if (!mounted || saved === null) return;
-        setLocationEnabled(saved === "true");
-      } catch {
-        // ignore preference read errors and keep default value
-      }
-    };
-
-    void loadLocationPreference();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    void AsyncStorage.setItem(LOCATION_PREF_KEY, String(locationEnabled));
-  }, [locationEnabled]);
-
   useEffect(() => {
     setSelectedBarKey(null);
   }, [statsRange]);
 
   const user = auth.currentUser;
-  const avatarUrl = currentProfile?.avatarUrl || user?.photoURL || "";
+  const avatarUrl = avatarPreviewUrl || currentProfile?.avatarUrl || "";
   const fullName =
     currentProfile?.username ||
     user?.displayName ||
@@ -282,6 +369,8 @@ export default function SettingsScreen() {
     ? new Date(user.metadata.creationTime).toLocaleDateString("pt-BR")
     : "Nao disponivel";
   const currentDayKey = useCurrentDayKey();
+
+  const passwordReq = passwordRequirementsStatus(newPassword);
 
   const todayTotal = useMemo(() => {
     return entries
@@ -550,8 +639,20 @@ export default function SettingsScreen() {
   const handlePickProfilePhoto = async () => {
     if (!user) return;
 
+    console.info("[settings][photo] start", {
+      uid: user.uid,
+      hasPhotoURL: Boolean(user.photoURL),
+      hasProfilePhoto: Boolean(currentProfile?.avatarUrl),
+    });
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    console.info("[settings][photo] permission", {
+      granted: permission.granted,
+      canAskAgain: permission.canAskAgain,
+      status: permission.status,
+    });
     if (!permission.granted) {
+      console.warn("[settings][photo] permission denied");
       Alert.alert(
         "Permissão",
         "Permita acesso às fotos para atualizar o perfil.",
@@ -563,35 +664,68 @@ export default function SettingsScreen() {
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.75,
+      quality: 0.35,
+      base64: true,
     });
 
-    if (result.canceled || !result.assets?.[0]?.uri) return;
+    console.info("[settings][photo] picker result", {
+      canceled: result.canceled,
+      assetCount: result.assets?.length || 0,
+      firstAsset: result.assets?.[0]
+        ? {
+            uri: result.assets[0].uri,
+            mimeType: result.assets[0].mimeType,
+            width: result.assets[0].width,
+            height: result.assets[0].height,
+          }
+        : null,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      console.info("[settings][photo] picker cancelled or without uri");
+      return;
+    }
 
     setUploadingPhoto(true);
     try {
       const selectedAsset = result.assets[0];
       const contentType = selectedAsset.mimeType || "image/jpeg";
       const extension = contentType.includes("png") ? "png" : "jpg";
+      const base64Data = selectedAsset.base64;
 
-      let blob: Blob;
-      try {
-        const response = await fetch(selectedAsset.uri);
-        blob = await response.blob();
-      } catch {
-        blob = await fileUriToBlob(selectedAsset.uri);
+      console.info("[settings][photo] selected asset", {
+        uri: selectedAsset.uri,
+        contentType,
+        extension,
+        hasBase64: Boolean(base64Data),
+      });
+
+      if (!base64Data) {
+        throw new Error("A imagem selecionada não veio com base64.");
       }
 
-      const photoRef = ref(
-        storage,
-        `avatars/${user.uid}/profile-${Date.now()}.${extension}`,
-      );
-      await uploadBytes(photoRef, blob, { contentType });
-      const downloadUrl = await getDownloadURL(photoRef);
-      await updateProfile(user, { photoURL: downloadUrl });
-      await updateProfilePhoto(downloadUrl);
+      const avatarDataUrl = `data:${contentType};base64,${base64Data}`;
+      console.info("[settings][photo] data url ready", {
+        dataUrlLength: avatarDataUrl.length,
+      });
+
+      if (avatarDataUrl.length > 900000) {
+        throw new Error("A imagem ficou grande demais para salvar no Firestore. Tente uma foto menor.");
+      }
+
+      setAvatarPreviewUrl(avatarDataUrl);
+      await updateProfilePhoto(avatarDataUrl);
+      console.info("[settings][photo] firestore profile updated");
       Alert.alert("Ok", "Foto de perfil atualizada.");
     } catch (error: any) {
+      console.error("[settings][photo] failed", {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack,
+        customData: error?.customData,
+        serverResponse: error?.customData?.serverResponse || error?.serverResponse,
+      });
       const serverPayload =
         error?.customData?.serverResponse || error?.serverResponse || "";
 
@@ -607,8 +741,14 @@ export default function SettingsScreen() {
   };
 
   const handleUpdateEmail = async () => {
-    if (!newEmail.trim() || !currentPassword.trim()) {
-      Alert.alert("Erro", "Preencha novo e-mail e senha atual.");
+    const trimmedEmail = stripSpaces(newEmail).trim();
+    const trimmedPassword = currentPassword.trim();
+    if (!trimmedEmail || !trimmedPassword) {
+      Alert.alert("Campos obrigatórios", "Preencha o novo e-mail e a senha atual.");
+      return;
+    }
+    if (!trimmedEmail.includes("@") || !trimmedEmail.includes(".")) {
+      Alert.alert("E-mail inválido", "Digite um e-mail válido, sem espaços.");
       return;
     }
 
@@ -616,29 +756,98 @@ export default function SettingsScreen() {
     try {
       const activeUser = auth.currentUser;
       if (!activeUser?.email) return;
+      console.info("[settings][email-change] start", {
+        uid: activeUser.uid,
+        currentEmail: activeUser.email,
+        nextEmail: trimmedEmail,
+      });
       const credential = EmailAuthProvider.credential(
         activeUser.email,
-        currentPassword,
+        trimmedPassword,
       );
+      console.info("[settings][email-change] reauthenticating");
       await reauthenticateWithCredential(activeUser, credential);
-      await updateEmail(activeUser, newEmail.trim());
+      console.info("[settings][email-change] sending verification before update");
+      await verifyBeforeUpdateEmail(activeUser, trimmedEmail, {
+        url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+        handleCodeInApp: true,
+      });
+      console.info("[settings][email-change] verification sent", {
+        uid: activeUser.uid,
+        nextEmail: trimmedEmail,
+      });
       setNewEmail("");
       setCurrentPassword("");
-      Alert.alert("Ok", "E-mail atualizado.");
+      setSettingsOption(null);
+      setActivePanel("none");
+      navigation.reset({
+        index: 0,
+        routes: [
+          {
+            name: "VerifyEmail",
+            params: {
+              message: "Enviamos a verificação para o novo e-mail. Confirme a mudança na sua caixa de entrada.",
+              flow: "email-change",
+              email: trimmedEmail,
+            },
+          },
+        ],
+      });
     } catch (error: any) {
-      Alert.alert("Erro", translateFirebaseError(error));
+      console.error("[settings][email-change] failed", {
+        code: error?.code,
+        message: error?.message,
+        customData: error?.customData,
+        serverResponse:
+          error?.customData?.serverResponse || error?.serverResponse,
+      });
+      if (error?.code === "auth/operation-not-allowed") {
+        setNewEmail("");
+        setCurrentPassword("");
+        setSettingsOption(null);
+        setActivePanel("none");
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: "VerifyEmail",
+              params: {
+                message: "Enviamos a verificação para o novo e-mail. Confirme a mudança na sua caixa de entrada.",
+                flow: "email-change",
+                email: trimmedEmail,
+              },
+            },
+          ],
+        });
+        return;
+      }
+      Alert.alert(
+        "Falha ao atualizar e-mail",
+        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e tente novamente.`,
+      );
     } finally {
       setLoadingAccount(false);
     }
   };
 
   const handleUpdatePassword = async () => {
-    if (!newPassword.trim() || !currentPassword.trim()) {
-      Alert.alert("Erro", "Preencha senha atual e nova senha.");
+    const trimmedNew = stripSpaces(newPassword);
+    const trimmedCurrent = currentPassword.trim();
+    if (!trimmedNew || !trimmedCurrent) {
+      Alert.alert("Campos obrigatórios", "Preencha a senha atual e a nova senha.");
       return;
     }
-    if (newPassword !== confirmPassword) {
-      Alert.alert("Erro", "As senhas não coincidem.");
+    if (trimmedNew !== confirmPassword.trim()) {
+      Alert.alert("Senhas diferentes", "A confirmação da nova senha precisa ser igual à senha digitada.");
+      return;
+    }
+
+    const missing = getMissingPasswordRequirements(trimmedNew);
+    if (missing.length > 0) {
+      Alert.alert(
+        "Senha não atende aos requisitos",
+        `Sua senha precisa conter: ${missing.join(", ")}.`,
+      );
       return;
     }
 
@@ -648,16 +857,48 @@ export default function SettingsScreen() {
       if (!activeUser?.email) return;
       const credential = EmailAuthProvider.credential(
         activeUser.email,
-        currentPassword,
+        trimmedCurrent,
       );
       await reauthenticateWithCredential(activeUser, credential);
-      await updatePassword(activeUser, newPassword);
+      await updatePassword(activeUser, trimmedNew);
       setNewPassword("");
       setConfirmPassword("");
       setCurrentPassword("");
       Alert.alert("Ok", "Senha atualizada.");
     } catch (error: any) {
-      Alert.alert("Erro", translateFirebaseError(error));
+      Alert.alert(
+        "Falha ao atualizar senha",
+        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e os requisitos da nova senha.`,
+      );
+    } finally {
+      setLoadingAccount(false);
+    }
+  };
+
+  const handleUpdateUsername = async () => {
+    const trimmedUsername = stripSpaces(newUsername).trim();
+    if (!trimmedUsername) {
+      Alert.alert("Campo obrigatório", "Preencha um nome de usuário.");
+      return;
+    }
+    if (trimmedUsername.length < 3) {
+      Alert.alert("Nome muito curto", "Use pelo menos 3 caracteres no nome de usuário.");
+      return;
+    }
+
+    setLoadingAccount(true);
+    try {
+      const activeUser = auth.currentUser;
+      if (!activeUser) return;
+      await updateProfile(activeUser, { displayName: trimmedUsername });
+      // Persist username to Firestore so SocialContext and other parts stay in sync
+      await setDoc(doc(db, "users", activeUser.uid), { username: trimmedUsername }, { merge: true });
+      setNewUsername("");
+      setSettingsOption(null);
+      setActivePanel("none");
+      Alert.alert("Ok", "Nome de usuário atualizado.");
+    } catch (error: any) {
+      Alert.alert("Falha ao atualizar nome", translateFirebaseError(error));
     } finally {
       setLoadingAccount(false);
     }
@@ -686,6 +927,15 @@ export default function SettingsScreen() {
                       const activeUser = auth.currentUser;
                       if (!activeUser) return;
                       await deleteUser(activeUser);
+                      try {
+                        await signOut(auth);
+                      } catch {
+                        // The session may already be invalidated after deleteUser.
+                      }
+                      navigation.reset({
+                        index: 0,
+                        routes: [{ name: "Login" }],
+                      });
                       Alert.alert(
                         "Conta excluída",
                         "Sua conta foi removida com sucesso.",
@@ -714,7 +964,11 @@ export default function SettingsScreen() {
     >
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <TouchableOpacity
-          onPress={() => navigation.dispatch(drawerOpen ? DrawerActions.closeDrawer() : DrawerActions.openDrawer())}
+          onPress={() => {
+            if (drawerNavigation) {
+              drawerNavigation.dispatch(DrawerActions.openDrawer());
+            }
+          }}
           style={{
             flexDirection: "row",
             alignItems: "center",
@@ -874,51 +1128,196 @@ export default function SettingsScreen() {
             marginBottom: 10,
           }}
         >
-          Preferências
+          Permissões do dispositivo
         </Text>
 
-        <TouchableOpacity
-          onPress={() => setActivePanel("settings")}
-          style={{
-            backgroundColor: palette.panelAlt,
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 10,
-          }}
-        >
-          <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-            Alterar informações
-          </Text>
-          <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-            Email, senha e dados da conta
-          </Text>
-        </TouchableOpacity>
+        <View style={{ marginBottom: 10 }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (settingsDropdownOpen) {
+                setSettingsDropdownOpen(false);
+                return;
+              }
+              if (settingsOption) {
+                setSettingsOption(null);
+                setSettingsDropdownOpen(false);
+                return;
+              }
+              setSettingsDropdownOpen(true);
+            }}
+            style={{
+              backgroundColor: palette.panelAlt,
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 6,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Alterar informações
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                Email, nome de usuário ou senha
+              </Text>
+            </View>
+            <Ionicons name={settingsDropdownOpen || settingsOption ? "chevron-up" : "chevron-down"} size={18} color={palette.textSecondary} />
+          </TouchableOpacity>
 
-        <View
-          style={{
-            backgroundColor: palette.panelAlt,
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 10,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-              Notificações
-            </Text>
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {notificationsEnabled ? "Ativadas" : "Desativadas"}
-            </Text>
-          </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            thumbColor={palette.switchThumb}
-            trackColor={{ true: palette.switchOn, false: palette.switchOff }}
-          />
+          {settingsDropdownOpen ? (
+            <View style={{ backgroundColor: palette.panelAlt, borderRadius: 12, padding: 6, borderWidth: 1, borderColor: palette.panel }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("email");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar e-mail</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar seu endereço de e-mail</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("username");
+                  setNewUsername(fullName || "");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar nome de usuário</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar o nome exibido</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSettingsOption("password");
+                  setSettingsDropdownOpen(false);
+                }}
+                style={{ paddingVertical: 10, paddingHorizontal: 8 }}
+              >
+                <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar senha</Text>
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>Atualizar sua senha</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {settingsOption ? (
+            <View style={{ backgroundColor: palette.panel, borderRadius: 12, padding: 12, marginTop: 8, marginBottom: 12, borderWidth: 1, borderColor: palette.panelAlt, shadowColor: '#000', shadowOpacity: darkModeEnabled ? 0.12 : 0.06, shadowRadius: 8, elevation: 2 }}>
+              {settingsOption === "email" ? (
+                <>
+                  <TextInput
+                    label="Novo e-mail"
+                    mode="outlined"
+                    value={newEmail}
+                    onChangeText={(value) => setNewEmail(stripSpaces(value))}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <TextInput
+                    label="Senha atual"
+                    mode="outlined"
+                    value={currentPassword}
+                    onChangeText={(value) => setCurrentPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    right={<TextInput.Icon icon={showPassword ? "eye-off" : "eye"} onPress={() => setShowPassword(!showPassword)} />}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdateEmail} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar e-mail
+                  </Button>
+                </>
+              ) : settingsOption === "username" ? (
+                <>
+                  <TextInput
+                    label="Novo nome de usuário"
+                    mode="outlined"
+                    value={newUsername}
+                    onChangeText={(value) => setNewUsername(stripSpaces(value))}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdateUsername} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar nome
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <TextInput
+                    label="Senha atual"
+                    mode="outlined"
+                    value={currentPassword}
+                    onChangeText={(value) => setCurrentPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    right={<TextInput.Icon icon={showPassword ? "eye-off" : "eye"} onPress={() => setShowPassword(!showPassword)} />}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <TextInput
+                    label="Nova senha"
+                    mode="outlined"
+                    value={newPassword}
+                    onChangeText={(value) => setNewPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <View style={{ marginBottom: 10 }}>
+                    <Text style={{ color: palette.textMuted, fontSize: 12, marginBottom: 6 }}>A senha deve conter:</Text>
+                    <View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.length ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.length ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.length ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Pelo menos 8 caracteres</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.upper ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.upper ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.upper ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Uma letra maiúscula</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.lower ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.lower ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.lower ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Uma letra minúscula</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                        <Ionicons name={passwordReq.number ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.number ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.number ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Um número</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <Ionicons name={passwordReq.special ? "checkmark-circle" : "close-circle"} size={14} color={passwordReq.special ? barPositiveColor : barNegativeColor} style={{ marginRight: 8 }} />
+                        <Text style={{ color: passwordReq.special ? palette.textPrimary : palette.textMuted, fontSize: 12 }}>Um caractere especial</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TextInput
+                    label="Confirmar nova senha"
+                    mode="outlined"
+                    value={confirmPassword}
+                    onChangeText={(value) => setConfirmPassword(stripSpaces(value))}
+                    secureTextEntry={!showPassword}
+                    outlineColor={palette.panelAlt}
+                    activeOutlineColor={palette.switchOn}
+                    contentStyle={{ paddingVertical: 6 }}
+                    style={{ marginBottom: 10, backgroundColor: palette.modalInput, borderRadius: 10 }}
+                  />
+                  <Button mode="contained" buttonColor={palette.switchOn} textColor={palette.panel} onPress={handleUpdatePassword} loading={loadingAccount} style={{ marginBottom: 8 }}>
+                    Atualizar senha
+                  </Button>
+                </>
+              )}
+              <Button mode="text" textColor={palette.textSecondary} onPress={() => setSettingsOption(null)}>Cancelar</Button>
+            </View>
+          ) : null}
         </View>
 
         <View
@@ -927,25 +1326,92 @@ export default function SettingsScreen() {
             borderRadius: 12,
             padding: 12,
             marginBottom: 10,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
-              Localização
-            </Text>
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-              {locationEnabled ? "Ativada" : "Desativada"}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: darkModeEnabled ? "rgba(77, 144, 254, 0.14)" : "rgba(77, 144, 254, 0.12)",
+                marginRight: 10,
+              }}
+            >
+              <Ionicons name="camera-outline" size={18} color="#4d90fe" />
+            </View>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Câmera
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                {cameraPermissionGranted === null
+                  ? "Verificando..."
+                  : cameraPermissionGranted
+                    ? "Concedida no sistema"
+                    : "Negada no sistema"}
+              </Text>
+            </View>
+            <Switch
+              value={cameraPermissionGranted === true}
+              onValueChange={(value) => void handlePermissionToggle("camera", value)}
+              disabled={cameraPermissionGranted === null}
+              thumbColor={palette.switchThumb}
+              trackColor={{ true: palette.switchOn, false: palette.switchOff }}
+            />
           </View>
-          <Switch
-            value={locationEnabled}
-            onValueChange={setLocationEnabled}
-            thumbColor={palette.switchThumb}
-            trackColor={{ true: palette.switchOn, false: palette.switchOff }}
-          />
+          <Text style={{ color: palette.textMuted, fontSize: 12, lineHeight: 17 }}>
+            Necessária para tirar fotos diretamente no app.
+          </Text>
+        </View>
+
+        <View
+          style={{
+            backgroundColor: palette.panelAlt,
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 10,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: darkModeEnabled ? "rgba(19, 192, 160, 0.14)" : "rgba(19, 192, 160, 0.12)",
+                marginRight: 10,
+              }}
+            >
+              <Ionicons name="location-outline" size={18} color="#13c0a0" />
+            </View>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>
+                Localização
+              </Text>
+              <Text style={{ color: palette.textMuted, fontSize: 12 }}>
+                {locationPermissionGranted === null
+                  ? "Verificando..."
+                  : locationPermissionGranted
+                    ? "Concedida no sistema"
+                    : "Negada no sistema"}
+              </Text>
+            </View>
+            <Switch
+              value={locationPermissionGranted === true}
+              onValueChange={(value) => void handlePermissionToggle("location", value)}
+              disabled={locationPermissionGranted === null}
+              thumbColor={palette.switchThumb}
+              trackColor={{ true: palette.switchOn, false: palette.switchOff }}
+            />
+          </View>
+          <Text style={{ color: palette.textMuted, fontSize: 12, lineHeight: 17 }}>
+            Usada para mostrar ecopontos próximos e rotas mais precisas.
+          </Text>
         </View>
 
         <View
@@ -1064,75 +1530,136 @@ export default function SettingsScreen() {
                   >
                     Configurações da conta
                   </Text>
-                  <TextInput
-                    label="Novo e-mail"
-                    mode="outlined"
-                    value={newEmail}
-                    onChangeText={setNewEmail}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <TextInput
-                    label="Senha atual"
-                    mode="outlined"
-                    value={currentPassword}
-                    onChangeText={setCurrentPassword}
-                    secureTextEntry={!showPassword}
-                    right={
-                      <TextInput.Icon
-                        icon={showPassword ? "eye-off" : "eye"}
-                        onPress={() => setShowPassword(!showPassword)}
+
+                  {!settingsOption ? (
+                    <View>
+                      <Text style={{ color: palette.textMuted, marginBottom: 10 }}>O que você deseja alterar?</Text>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
+                        <Button mode="outlined" onPress={() => setSettingsOption("email")} style={{ flex: 1, marginRight: 6 }}>E-mail</Button>
+                        <Button mode="outlined" onPress={() => { setSettingsOption("username"); setNewUsername(fullName || ""); }} style={{ flex: 1, marginHorizontal: 6 }}>Nome</Button>
+                        <Button mode="outlined" onPress={() => setSettingsOption("password")} style={{ flex: 1, marginLeft: 6 }}>Senha</Button>
+                      </View>
+                      <Button mode="text" onPress={() => { setActivePanel("none"); }}>Fechar</Button>
+                    </View>
+                  ) : settingsOption === "email" ? (
+                    <View>
+                      <TextInput
+                        label="Novo e-mail"
+                        mode="outlined"
+                        value={newEmail}
+                        onChangeText={setNewEmail}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
                       />
-                    }
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <Button
-                    mode="contained"
-                    buttonColor="#36a3ff"
-                    textColor="#032746"
-                    onPress={handleUpdateEmail}
-                    loading={loadingAccount}
-                    style={{ marginBottom: 14 }}
-                  >
-                    Atualizar e-mail
-                  </Button>
-                  <TextInput
-                    label="Nova senha"
-                    mode="outlined"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    secureTextEntry={!showPassword}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <TextInput
-                    label="Confirmar nova senha"
-                    mode="outlined"
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry={!showPassword}
-                    style={{
-                      marginBottom: 10,
-                      backgroundColor: palette.modalInput,
-                    }}
-                  />
-                  <Button
-                    mode="contained"
-                    buttonColor="#36a3ff"
-                    textColor="#032746"
-                    onPress={handleUpdatePassword}
-                    loading={loadingAccount}
-                    style={{ marginBottom: 10 }}
-                  >
-                    Atualizar senha
-                  </Button>
+                      <TextInput
+                        label="Senha atual"
+                        mode="outlined"
+                        value={currentPassword}
+                        onChangeText={setCurrentPassword}
+                        secureTextEntry={!showPassword}
+                        right={
+                          <TextInput.Icon
+                            icon={showPassword ? "eye-off" : "eye"}
+                            onPress={() => setShowPassword(!showPassword)}
+                          />
+                        }
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdateEmail}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 14 }}
+                      >
+                        Atualizar e-mail
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  ) : settingsOption === "username" ? (
+                    <View>
+                      <TextInput
+                        label="Novo nome de usuário"
+                        mode="outlined"
+                        value={newUsername}
+                        onChangeText={setNewUsername}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdateUsername}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 14 }}
+                      >
+                        Atualizar nome
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  ) : (
+                    <View>
+                      <TextInput
+                        label="Senha atual"
+                        mode="outlined"
+                        value={currentPassword}
+                        onChangeText={setCurrentPassword}
+                        secureTextEntry={!showPassword}
+                        right={
+                          <TextInput.Icon
+                            icon={showPassword ? "eye-off" : "eye"}
+                            onPress={() => setShowPassword(!showPassword)}
+                          />
+                        }
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <TextInput
+                        label="Nova senha"
+                        mode="outlined"
+                        value={newPassword}
+                        onChangeText={setNewPassword}
+                        secureTextEntry={!showPassword}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <TextInput
+                        label="Confirmar nova senha"
+                        mode="outlined"
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        secureTextEntry={!showPassword}
+                        style={{
+                          marginBottom: 10,
+                          backgroundColor: palette.modalInput,
+                        }}
+                      />
+                      <Button
+                        mode="contained"
+                        buttonColor="#36a3ff"
+                        textColor="#032746"
+                        onPress={handleUpdatePassword}
+                        loading={loadingAccount}
+                        style={{ marginBottom: 10 }}
+                      >
+                        Atualizar senha
+                      </Button>
+                      <Button mode="text" onPress={() => setSettingsOption(null)}>Voltar</Button>
+                    </View>
+                  )}
                 </View>
               ) : null}
 

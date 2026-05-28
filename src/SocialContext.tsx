@@ -19,6 +19,7 @@ import React, {
     useMemo,
     useState,
 } from "react";
+import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../service/firebaseConfig";
 
 export type SocialUser = {
@@ -121,16 +122,27 @@ function toIsoDate(
 
 export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<SocialUser[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<SocialUser | null>(null);
   const [feedPosts, setFeedPosts] = useState<SocialPost[]>([]);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [followerEvents, setFollowerEvents] = useState<FollowerEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
 
-  const currentUid = auth.currentUser?.uid;
+  const currentUid = currentUser?.uid;
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (nextUser) => {
+      setCurrentUser(nextUser);
+    });
+
+    return unsubscribeAuth;
+  }, []);
 
   useEffect(() => {
     if (!currentUid) {
       setUsers([]);
+      setCurrentUserProfile(null);
       setFeedPosts([]);
       setFollowingIds(new Set());
       setFollowerEvents([]);
@@ -148,7 +160,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         username:
           user?.displayName?.trim() || user?.email?.split("@")[0] || "Usuario",
         email: user?.email || "",
-        avatarUrl: user?.photoURL || "",
+        emailLower: user?.email?.trim().toLowerCase() || "",
         createdAt: serverTimestamp(),
         followersCount: 0,
         followingCount: 0,
@@ -156,68 +168,126 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       { merge: true },
     );
 
-    const usersQuery = query(
-      collection(db, "users"),
-      orderBy("username", "asc"),
-      limit(100),
-    );
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const nextUsers: SocialUser[] = snapshot.docs.map((snap) => {
-        const data = snap.data() as Partial<SocialUser>;
-        return {
-          uid: snap.id,
+    const currentUserRef = doc(db, "users", currentUid);
+    const unsubscribeCurrentUser = onSnapshot(
+      currentUserRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setCurrentUserProfile(null);
+          return;
+        }
+
+        const data = snapshot.data() as Partial<SocialUser>;
+        setCurrentUserProfile({
+          uid: snapshot.id,
           username: data.username || "Usuario",
           email: data.email,
           avatarUrl: data.avatarUrl,
           bio: data.bio,
           followersCount: Number(data.followersCount || 0),
           followingCount: Number(data.followingCount || 0),
-        };
-      });
-      setUsers(nextUsers);
-    });
+        });
+      },
+      (error) => {
+        console.warn("Current user listener failed:", error);
+      },
+    );
+
+    const usersQuery = query(
+      collection(db, "users"),
+      orderBy("username", "asc"),
+      limit(100),
+    );
+    const unsubscribeUsers = onSnapshot(
+      usersQuery,
+      (snapshot) => {
+        const nextUsers: SocialUser[] = snapshot.docs.map((snap) => {
+          const data = snap.data() as Partial<SocialUser>;
+          return {
+            uid: snap.id,
+            username: data.username || "Usuario",
+            email: data.email,
+            avatarUrl: data.avatarUrl,
+            bio: data.bio,
+            followersCount: Number(data.followersCount || 0),
+            followingCount: Number(data.followingCount || 0),
+          };
+        });
+        setUsers(nextUsers);
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setUsers([]);
+          return;
+        }
+        console.warn("Users listener failed:", error);
+      },
+    );
 
     const followingQuery = query(
       collection(db, "users", currentUid, "following"),
       orderBy("createdAt", "desc"),
     );
-    const unsubscribeFollowing = onSnapshot(followingQuery, (snapshot) => {
-      setFollowingIds(new Set(snapshot.docs.map((snap) => snap.id)));
-    });
+    const unsubscribeFollowing = onSnapshot(
+      followingQuery,
+      (snapshot) => {
+        setFollowingIds(new Set(snapshot.docs.map((snap) => snap.id)));
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setFollowingIds(new Set());
+          return;
+        }
+        console.warn("Following listener failed:", error);
+      },
+    );
 
     const followersQuery = query(
       collection(db, "users", currentUid, "followers"),
       orderBy("createdAt", "desc"),
     );
-    const unsubscribeFollowers = onSnapshot(followersQuery, (snapshot) => {
-      setFollowerEvents(
-        snapshot.docs.map((snap) => ({
-          uid: snap.id,
-          createdAt: toIsoDate(snap.data().createdAt),
-        })),
-      );
-    });
+    const unsubscribeFollowers = onSnapshot(
+      followersQuery,
+      (snapshot) => {
+        setFollowerEvents(
+          snapshot.docs.map((snap) => ({
+            uid: snap.id,
+            createdAt: toIsoDate(snap.data().createdAt),
+          })),
+        );
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setFollowerEvents([]);
+          return;
+        }
+        console.warn("Followers listener failed:", error);
+      },
+    );
 
     const postsQuery = query(
       collection(db, "posts"),
       orderBy("createdAt", "desc"),
       limit(40),
     );
-    const unsubscribePosts = onSnapshot(postsQuery, async (snapshot) => {
-      const nextPosts = await Promise.all(
-        snapshot.docs.map(async (snap) => {
-          const data = snap.data() as any;
+    const unsubscribePosts = onSnapshot(
+      postsQuery,
+      async (snapshot) => {
+        try {
+          const nextPosts = await Promise.all(
+            snapshot.docs.map(async (snap) => {
+              const data = snap.data() as any;
 
-          const reactionsSnapshot = await getDocs(
-            collection(db, "posts", snap.id, "reactions"),
-          );
-          const commentsSnapshot = await getDocs(
-            query(
-              collection(db, "posts", snap.id, "comments"),
-              orderBy("createdAt", "desc"),
-              limit(4),
-            ),
-          );
+              const reactionsSnapshot = await getDocs(
+                collection(db, "posts", snap.id, "reactions"),
+              );
+              const commentsSnapshot = await getDocs(
+                query(
+                  collection(db, "posts", snap.id, "comments"),
+                  orderBy("createdAt", "desc"),
+                  limit(4),
+                ),
+              );
 
           const reactionSummary: Record<ReactionType, number> = {
             like: 0,
@@ -298,11 +368,26 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         }),
       );
 
-      setFeedPosts(nextPosts);
-      setLoading(false);
-    });
+          setFeedPosts(nextPosts);
+          setLoading(false);
+        } catch (error) {
+          console.warn("Posts hydration failed:", error);
+          setFeedPosts([]);
+          setLoading(false);
+        }
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setFeedPosts([]);
+          setLoading(false);
+          return;
+        }
+        console.warn("Posts listener failed:", error);
+      },
+    );
 
     return () => {
+      unsubscribeCurrentUser();
       unsubscribeUsers();
       unsubscribeFollowing();
       unsubscribeFollowers();
@@ -318,19 +403,20 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     return map;
   }, [users]);
 
-  const currentProfile = currentUid ? usersById.get(currentUid) || null : null;
+  const currentProfileFromList = currentUid ? usersById.get(currentUid) || null : null;
+  const currentProfile = currentUserProfile || currentProfileFromList;
 
   const enrichedPosts = useMemo(
     () =>
       feedPosts.map((post) => {
-        const author = usersById.get(post.authorId);
+        const author = post.authorId === currentUid ? currentProfile : usersById.get(post.authorId);
         return {
           ...post,
           authorName: author?.username || "Usuario",
           authorAvatar: author?.avatarUrl,
         };
       }),
-    [feedPosts, usersById],
+    [feedPosts, usersById, currentUid, currentProfile],
   );
 
   const myPosts = useMemo(
@@ -544,6 +630,12 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    console.info("[social][profile-photo] saving to firestore", {
+      uid: currentUid,
+      hasAvatarUrl: Boolean(avatarUrl),
+      avatarUrlLength: avatarUrl.length,
+    });
+
     await setDoc(
       doc(db, "users", currentUid),
       {
@@ -551,6 +643,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       },
       { merge: true },
     );
+
+    console.info("[social][profile-photo] saved to firestore", {
+      uid: currentUid,
+    });
   };
 
   return (

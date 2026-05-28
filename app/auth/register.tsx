@@ -1,13 +1,15 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
+import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import {
     createUserWithEmailAndPassword,
+  onAuthStateChanged,
     sendEmailVerification,
     updateProfile,
 } from "firebase/auth";
 import { doc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,11 +23,12 @@ type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   Main: undefined;
-  VerifyEmail: { message?: string; error?: string } | undefined;
+  VerifyEmail: { message?: string; error?: string; email?: string } | undefined;
 };
 
 export default function RegisterScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const router = useRouter();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const { top: insetTop } = useSafeAreaInsets();
@@ -144,6 +147,7 @@ export default function RegisterScreen() {
               uid: userCredential.user.uid,
               username: username.trim(),
               email: email,
+              emailLower: email.trim().toLowerCase(),
               avatarUrl: "",
               bio: "",
               followersCount: 0,
@@ -159,22 +163,47 @@ export default function RegisterScreen() {
         }
 
         setStatusMessage("Enviando confirmação por e-mail...");
-        await withTimeout(
-          sendEmailVerification(userCredential.user, {
-            url: "https://jenkaroline.github.io/recycling-logistics-app/action",
-            handleCodeInApp: true,
-          }),
-          "Envio da confirmação por e-mail",
-        );
+        let verificationSent = false;
+        let verificationError = "";
+        try {
+          await withTimeout(
+            sendEmailVerification(userCredential.user, {
+              url: "https://jenkaroline.github.io/recycling-logistics-app/action/",
+              handleCodeInApp: true,
+            }),
+            "Envio da confirmação por e-mail",
+          );
+          verificationSent = true;
+        } catch (sendError: any) {
+          if (String(sendError?.message || "").includes("demorou demais")) {
+            console.warn("[register] verification email timed out after queueing", sendError);
+            verificationSent = true;
+          } else {
+            verificationError = translateFirebaseError(sendError);
+          }
+        }
+
         setStatusMessage("Indo para a verificação...");
+        const verifyParams = {
+          message: verificationSent
+            ? "Conta criada com sucesso! Verifique seu e-mail."
+            : "Conta criada. Vá para a confirmação e tente reenviar o e-mail.",
+          error: verificationSent ? undefined : verificationError,
+          email: userCredential.user.email || email,
+          flow: "register" as const,
+        };
         navigation.reset({
           index: 0,
           routes: [
             {
               name: "VerifyEmail",
-              params: { message: "Conta criada com sucesso! Verifique seu e-mail." },
+              params: verifyParams,
             },
           ],
+        });
+        router.replace({
+          pathname: "/auth/verifyEmail",
+          params: verifyParams as any,
         });
       }
     } catch (error: any) {
@@ -185,6 +214,30 @@ export default function RegisterScreen() {
       setIsRegistering(false);
     }
   };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user || user.emailVerified) return;
+
+      const verifyParams = {
+        message: "Conta criada com sucesso! Verifique seu e-mail.",
+        email: user.email || "",
+        flow: "register" as const,
+      };
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "VerifyEmail", params: verifyParams }],
+      });
+
+      router.replace({
+        pathname: "/auth/verifyEmail",
+        params: verifyParams as any,
+      });
+    });
+
+    return unsubscribe;
+  }, [navigation, router]);
 
   return (
     <ScrollView
