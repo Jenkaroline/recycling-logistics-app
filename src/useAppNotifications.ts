@@ -47,6 +47,10 @@ type UserNotificationDoc = {
   actorName?: string;
   title?: string;
   description?: string;
+  sourceId?: string;
+  recipientUid?: string;
+  ownerId?: string;
+  status?: "pending" | "accepted" | "declined";
   createdAt?: string;
 };
 
@@ -251,16 +255,21 @@ export function useAppNotifications() {
             const data = snap.data() as UserNotificationDoc;
             const rawCreatedAt = toIsoString(data.createdAt);
 
-            if (data.type === "member-removed") {
+            if (data.type === "member-removed" || data.type === "group-invitation") {
+              const isGroupInvite = data.type === "group-invitation";
+              const status = data.status || (isGroupInvite ? "pending" : undefined);
               return {
                 id: `usernotif-${snap.id}`,
                 sourceId: snap.id,
-                kind: "member-removed",
+                kind: isGroupInvite ? (status === "pending" ? "invitation" : "invitation-response") : "member-removed",
                 groupId: data.groupId || "",
                 groupName: data.groupName || "Grupo",
                 title: data.title || data.groupName || "Grupo",
-                description: data.description || `${data.actorName || "Alguém"} removeu você do grupo.`,
+                description: data.description || (isGroupInvite ? `${data.actorName || "Alguém"} convidou você para um grupo.` : `${data.actorName || "Alguém"} removeu você do grupo.`),
                 actorName: data.actorName || undefined,
+                recipientUid: data.recipientUid,
+                ownerId: data.ownerId,
+                status,
                 timestamp: toTimestamp(rawCreatedAt),
                 rawCreatedAt,
               } satisfies AppNotificationItem;
@@ -427,46 +436,69 @@ export function useAppNotifications() {
     if (!currentUid) return [];
 
     return groupInvitations
-      .filter((invite) => invite.recipientUid === currentUid || invite.ownerId === currentUid)
-      .map((invite) => {
-        const received = invite.recipientUid === currentUid;
-        const timestamp = toTimestamp(received ? invite.createdAt : invite.updatedAt || invite.createdAt);
-        const actorName = received ? invite.ownerName : invite.recipientName || invite.recipientEmail;
-        const rawCreatedAt = toIsoString(received ? invite.createdAt : invite.updatedAt || invite.createdAt);
+      .flatMap((invite) => {
+        const timestamp = toTimestamp(invite.updatedAt || invite.createdAt);
+        const rawCreatedAt = toIsoString(invite.updatedAt || invite.createdAt);
 
-        return {
-          id: `invite-${invite.id}`,
-          sourceId: invite.id,
-          kind: received && invite.status === "pending" ? "invitation" : "invitation-response",
-          groupId: invite.groupId,
-          groupName: invite.groupName,
-          title: invite.groupName,
-          description: received
-            ? invite.status === "pending"
-              ? `Convite de ${actorName} aguardando sua resposta.`
-              : invite.status === "accepted"
-                ? `Você aceitou o convite de ${actorName}.`
-                : `Você recusou o convite de ${actorName}.`
-            : invite.status === "accepted"
-              ? `${actorName} aceitou o seu convite.`
-              : `${actorName} recusou o seu convite.`,
-          actorName,
-          ownerId: invite.ownerId,
-          recipientUid: invite.recipientUid,
-          status: invite.status,
-          timestamp,
-          rawCreatedAt,
-        } satisfies AppNotificationItem;
-      })
-        // Only show pending invitations to the recipient; owners only see responses (accepted/declined)
-        .filter((item) => (item.recipientUid === currentUid && item.status === "pending") || item.status !== "pending");
+        if (invite.recipientUid === currentUid && invite.status === "pending") {
+          return {
+            id: `invite-${invite.id}`,
+            sourceId: invite.id,
+            kind: "invitation" as const,
+            groupId: invite.groupId,
+            groupName: invite.groupName,
+            title: invite.groupName,
+            description: `Convite de ${invite.ownerName} aguardando sua resposta.`,
+            actorName: invite.ownerName,
+            ownerId: invite.ownerId,
+            recipientUid: invite.recipientUid,
+            status: invite.status,
+            timestamp,
+            rawCreatedAt,
+          } satisfies AppNotificationItem;
+        }
+
+        if (invite.ownerId === currentUid && invite.status !== "pending") {
+          const actorName = invite.recipientName || invite.recipientEmail;
+          return {
+            id: `invite-${invite.id}`,
+            sourceId: invite.id,
+            kind: "invitation-response" as const,
+            groupId: invite.groupId,
+            groupName: invite.groupName,
+            title: invite.groupName,
+            description:
+              invite.status === "accepted"
+                ? `${actorName} aceitou o seu convite.`
+                : `${actorName} recusou o seu convite.`,
+            actorName,
+            ownerId: invite.ownerId,
+            recipientUid: invite.recipientUid,
+            status: invite.status,
+            timestamp,
+            rawCreatedAt,
+          } satisfies AppNotificationItem;
+        }
+
+        return [];
+      });
   }, [groupInvitations, currentUid]);
 
   const chatNotifications = useMemo(() => Object.values(chatByGroup).flat(), [chatByGroup]);
   const evidenceNotifications = useMemo(() => Object.values(evidenceByGroup).flat(), [evidenceByGroup]);
 
   const notifications = useMemo(() => {
-    return [...invitationNotifications, ...chatNotifications, ...evidenceNotifications, ...userNotifications].sort((a, b) => b.timestamp - a.timestamp);
+    const deduped = new Map<string, AppNotificationItem>();
+
+    [...invitationNotifications, ...chatNotifications, ...evidenceNotifications, ...userNotifications].forEach((notification) => {
+      const key = `${notification.kind}:${notification.sourceId}:${notification.groupId}`;
+      const existing = deduped.get(key);
+      if (!existing || notification.timestamp >= existing.timestamp) {
+        deduped.set(key, notification);
+      }
+    });
+
+    return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp);
   }, [invitationNotifications, chatNotifications, evidenceNotifications, userNotifications]);
 
   const unreadNotifications = useMemo(() => {

@@ -192,15 +192,6 @@ export default function RegisterScreen() {
           email: userCredential.user.email || email,
           flow: "register" as const,
         };
-        navigation.reset({
-          index: 0,
-          routes: [
-            {
-              name: "VerifyEmail",
-              params: verifyParams,
-            },
-          ],
-        });
         router.replace({
           pathname: "/auth/verifyEmail",
           params: verifyParams as any,
@@ -224,11 +215,6 @@ export default function RegisterScreen() {
         email: user.email || "",
         flow: "register" as const,
       };
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "VerifyEmail", params: verifyParams }],
-      });
 
       router.replace({
         pathname: "/auth/verifyEmail",
@@ -360,7 +346,7 @@ export default function RegisterScreen() {
         <Button
           mode="text"
           textColor={palette.link}
-          onPress={() => navigation.navigate("Login")}
+          onPress={() => router.replace("/auth/login")}
           style={styles.linkButton}
         >
           Já tem uma conta? Login

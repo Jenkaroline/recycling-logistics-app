@@ -4,7 +4,8 @@ import { ScrollView, View, Text, StyleSheet, useWindowDimensions, ActivityIndica
 import { Button, TextInput } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { sendPasswordResetEmail } from "firebase/auth";
+import { useRouter } from "expo-router";
+import { fetchSignInMethodsForEmail, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../../service/firebaseConfig";
 import { translateFirebaseError } from "../../src/firebaseErrorMapper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
@@ -21,6 +22,7 @@ type RootStackParamList = {
 
 export default function ResetPasswordScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const router = useRouter();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const { top: insetTop } = useSafeAreaInsets();
@@ -63,26 +65,51 @@ export default function ResetPasswordScreen() {
     ? require("../../assets/images/erro-ilustracao.png")
     : require("../../assets/images/senha.png");
 
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
   const handleSendReset = async () => {
     setError("");
     setStatusMessage("");
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
       setError("E-mail é obrigatório!");
+      return;
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      setError("Digite um e-mail válido para recuperar a senha.");
       return;
     }
     setIsSending(true);
     try {
+      const signInMethods = await fetchSignInMethodsForEmail(auth, normalizedEmail);
+      if (signInMethods.length === 0) {
+        setError("Não encontramos uma conta cadastrada com esse e-mail no app. Confira o endereço ou crie uma conta.");
+        return;
+      }
+
       const redirectUrl = "https://jenkaroline.github.io/recycling-logistics-app/action/";
       const actionCodeSettings = {
         // Use an HTTPS redirect page (GitHub Pages) that forwards the oobCode to the app scheme.
         url: redirectUrl,
         handleCodeInApp: true,
       } as any;
-      await sendPasswordResetEmail(auth, sanitize(email), actionCodeSettings);
+      await sendPasswordResetEmail(auth, normalizedEmail, actionCodeSettings);
       setStatusMessage("E-mail de redefinição enviado. Verifique sua caixa de entrada.");
     } catch (err: any) {
-      const mapped = translateFirebaseError(err);
-      setError(mapped);
+      const code = err?.code?.toString?.() || "";
+      if (code === "auth/invalid-email") {
+        setError("Digite um e-mail válido para recuperar a senha.");
+      } else if (code === "auth/user-not-found") {
+        setError("Não encontramos uma conta com esse e-mail no app.");
+      } else if (code === "auth/too-many-requests") {
+        setError("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
+      } else if (code === "auth/network-request-failed") {
+        setError("Falha de conexão. Verifique sua internet e tente novamente.");
+      } else {
+        const mapped = translateFirebaseError(err);
+        setError(mapped === "Não foi possível concluir a ação. Tente novamente mais tarde." ? "Não foi possível enviar o e-mail de redefinição agora. Tente novamente em instantes." : mapped);
+      }
       setStatusMessage("");
     } finally {
       setIsSending(false);
@@ -167,7 +194,7 @@ export default function ResetPasswordScreen() {
         <Button
           mode="text"
           textColor={palette.textSecondary}
-          onPress={() => navigation.navigate("Login")}
+          onPress={() => router.replace("/auth/login")}
           style={styles.linkButton}
         >
           Voltar ao login

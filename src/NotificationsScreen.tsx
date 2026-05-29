@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, DrawerActions } from "@react-navigation/native";
 import { useDrawerStatus } from "@react-navigation/drawer";
 import React, { useMemo } from "react";
-import { Alert, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "./RecyclingCompetitionContext";
+import { useSocial } from "./SocialContext";
 import { useThemePreference } from "./ThemePreferenceContext";
 import { AppNotificationItem, useAppNotifications } from "./useAppNotifications";
 
@@ -101,9 +103,22 @@ export default function NotificationsScreen() {
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const currentUid = auth.currentUser?.uid || null;
-  const { acceptGroupInvitation, declineGroupInvitation } = useRecyclingCompetition();
+  const { acceptGroupInvitation, declineGroupInvitation, groups, setActiveGroup } = useRecyclingCompetition();
   const { notifications, markNotificationsAsSeen } = useAppNotifications();
   const { darkModeEnabled } = useThemePreference();
+  const { users: socialUsers } = useSocial();
+
+  const usersById = useMemo(() => {
+    const map = new Map<string, any>();
+    socialUsers.forEach((u: any) => map.set(u.uid, u));
+    return map;
+  }, [socialUsers]);
+
+  const groupsById = useMemo(() => {
+    const map = new Map<string, any>();
+    (groups || []).forEach((g: any) => map.set(g.id, g));
+    return map;
+  }, [groups]);
 
   const palette = darkModeEnabled
     ? {
@@ -263,8 +278,42 @@ export default function NotificationsScreen() {
                     const cardBackground = darkModeEnabled ? "rgba(255, 255, 255, 0.02)" : "#ffffff";
 
                     return (
-                      <View
+                      <TouchableOpacity
                         key={item.id}
+                        activeOpacity={0.8}
+                        onPress={async () => {
+                          try {
+                            if (item.groupId) await setActiveGroup(item.groupId);
+                          } catch {
+                            /* ignore */
+                          }
+
+                          try {
+                            // route based on notification kind
+                            if (item.kind === "chat") {
+                              // open group view on chat tab
+                              navigation.navigate("MeusGrupos", { groupId: item.groupId, tab: "chat" });
+                              return;
+                            }
+
+                            if (item.kind === "evidence") {
+                              // open group feed where evidences are listed
+                              navigation.navigate("MeusGrupos", { groupId: item.groupId, tab: "feed" });
+                              return;
+                            }
+
+                            // invitation, invitation-response, member-removed or other group-scoped
+                            if (item.groupId) {
+                              navigation.navigate("MeusGrupos", { groupId: item.groupId, tab: "stats" });
+                              return;
+                            }
+
+                            // fallback to Home recycling tab
+                            navigation.navigate("Home", { tab: "recycling", groupId: item.groupId });
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
                         style={{
                           borderWidth: 1,
                           borderColor: tone.border,
@@ -278,20 +327,36 @@ export default function NotificationsScreen() {
                           <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                             <View style={{ flex: 1 }}>
                               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 4 }}>
-                                <Text
-                                  style={{
-                                    color: palette.textPrimary,
-                                    fontWeight: "800",
-                                    fontSize: item.kind === "chat" ? 15 : 16,
-                                    lineHeight: item.kind === "chat" ? 20 : 22,
-                                    flexShrink: 1,
-                                    paddingRight: 4,
-                                  }}
-                                  numberOfLines={2}
-                                  ellipsizeMode="tail"
-                                >
-                                  {item.title}
-                                </Text>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                                  <View style={{ width: 44, height: 44, borderRadius: 12, overflow: "hidden", backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+                                    {(() => {
+                                      const group = groupsById.get(item.groupId || "");
+                                      const referencedUserId = item.ownerId && item.ownerId !== currentUid ? item.ownerId : item.recipientUid && item.recipientUid !== currentUid ? item.recipientUid : undefined;
+                                      const avatarUrl = group?.imageUrl || (referencedUserId ? usersById.get(referencedUserId)?.avatarUrl : undefined) || socialUsers.find((u) => u.username === item.actorName)?.avatarUrl;
+                                      if (avatarUrl) {
+                                        return <Image source={{ uri: avatarUrl }} style={{ width: 44, height: 44 }} contentFit="cover" />;
+                                      }
+
+                                      const initials = (item.actorName || item.title || "?").split(" ").map((s) => s.charAt(0)).slice(0, 2).join("").toUpperCase();
+                                      return <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{initials}</Text>;
+                                    })()}
+                                  </View>
+
+                                  <Text
+                                    style={{
+                                      color: palette.textPrimary,
+                                      fontWeight: "800",
+                                      fontSize: item.kind === "chat" ? 15 : 16,
+                                      lineHeight: item.kind === "chat" ? 20 : 22,
+                                      flexShrink: 1,
+                                      paddingRight: 4,
+                                    }}
+                                    numberOfLines={2}
+                                    ellipsizeMode="tail"
+                                  >
+                                    {item.title}
+                                  </Text>
+                                </View>
                                 <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: tone.tint, marginTop: 1 }}>
                                   <Text style={{ color: tone.accent, fontSize: 10, fontWeight: "800" }}>{kindLabel(item.kind)}</Text>
                                 </View>
@@ -305,13 +370,6 @@ export default function NotificationsScreen() {
                               </Text>
                             </View>
 
-                            {isInvitation ? (
-                              <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: item.status === "accepted" ? palette.successBorder : item.status === "declined" ? palette.dangerBorder : tone.border, backgroundColor: item.status === "accepted" ? palette.successSoft : item.status === "declined" ? palette.dangerSoft : tone.tint }}>
-                                <Text style={{ color: item.status === "accepted" ? palette.success : item.status === "declined" ? palette.danger : palette.textMuted, fontSize: 11, fontWeight: "800" }}>
-                                  {item.status === "accepted" ? "Aceito" : item.status === "declined" ? "Recusado" : "Pendente"}
-                                </Text>
-                              </View>
-                            ) : null}
                           </View>
 
                           {isReceivedInvitation && item.status === "pending" ? (
@@ -332,7 +390,7 @@ export default function NotificationsScreen() {
                             </View>
                           ) : null}
                         </View>
-                      </View>
+                      </TouchableOpacity>
                     );
                   })}
                 </View>

@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { addDoc, collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc } from "firebase/firestore";
 import { auth } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "../src/RecyclingCompetitionContext";
+import { useSocial } from "../src/SocialContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
@@ -138,6 +139,13 @@ export default function MyGroupsScreen() {
     adjustGroupXp,
   } = useRecyclingCompetition();
 
+  const { users: socialUsers } = useSocial();
+  const usersById = useMemo(() => {
+    const map = new Map<string, any>();
+    socialUsers.forEach((u: any) => map.set(u.uid, u));
+    return map;
+  }, [socialUsers]);
+
   const [createVisible, setCreateVisible] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
@@ -157,6 +165,12 @@ export default function MyGroupsScreen() {
   const [contestModalVisible, setContestModalVisible] = useState(false);
   const [contestReason, setContestReason] = useState("");
   const [contestTargetEntry, setContestTargetEntry] = useState<GroupEvidenceEntry | null>(null);
+  const [contestDetailsVisible, setContestDetailsVisible] = useState(false);
+  const [contestDetailsTargetEntry, setContestDetailsTargetEntry] = useState<GroupEvidenceEntry | null>(null);
+  const [evidenceNoteVisible, setEvidenceNoteVisible] = useState(false);
+  const [evidenceNoteText, setEvidenceNoteText] = useState("");
+  const [pendingEvidencePhoto, setPendingEvidencePhoto] = useState<string | null>(null);
+  const [pendingEvidenceItem, setPendingEvidenceItem] = useState<{ id: string; type: string; xp: number } | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
 
   const resetCreateForm = () => {
@@ -705,21 +719,40 @@ export default function MyGroupsScreen() {
 
   const handleAddGroupRecord = async (item: { id: string; type: string; xp: number }) => {
     if (!selectedGroup) return;
-
     const photoUrl = await captureRecyclingEvidencePhoto();
     if (!photoUrl) return;
+
+    // store pending evidence and open note modal
+    setPendingEvidencePhoto(photoUrl);
+    setPendingEvidenceItem(item);
+    setEvidenceNoteText("");
+    setEvidenceNoteVisible(true);
+  };
+
+  const sendPendingEvidence = async () => {
+    if (!selectedGroup || !pendingEvidenceItem || !pendingEvidencePhoto) {
+      setEvidenceNoteVisible(false);
+      setPendingEvidenceItem(null);
+      setPendingEvidencePhoto(null);
+      return;
+    }
 
     try {
       const currentUser = auth.currentUser;
       await addRecyclingAction({
-        type: item.type,
-        typeId: item.id,
+        type: pendingEvidenceItem.type,
+        typeId: pendingEvidenceItem.id,
         groupId: selectedGroup.id,
-        photoUrl,
+        photoUrl: pendingEvidencePhoto,
         authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
-        xpEarned: item.xp,
+        xpEarned: pendingEvidenceItem.xp,
+        notes: evidenceNoteText.trim() || undefined,
       });
-      await awardXpToActiveGroup(item.xp);
+
+      await awardXpToActiveGroup(pendingEvidenceItem.xp);
+      setEvidenceNoteVisible(false);
+      setPendingEvidenceItem(null);
+      setPendingEvidencePhoto(null);
       navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
     } catch (error) {
       Alert.alert("Falha ao registrar evidência", translateFirebaseError(error));
@@ -735,6 +768,31 @@ export default function MyGroupsScreen() {
     setContestTargetEntry(entry);
     setContestReason("");
     setContestModalVisible(true);
+  };
+
+  const openContestDetails = (entry: GroupEvidenceEntry) => {
+    if (!(Number(entry.contestCount || 0) > 0 || Boolean(entry.contestPenaltyApplied))) {
+      return;
+    }
+    setContestDetailsTargetEntry(entry);
+    setContestDetailsVisible(true);
+  };
+
+  const openContestAction = (entry: GroupEvidenceEntry) => {
+    const contestCount = Number(entry.contestCount || 0);
+    const isOwnEntry = entry.authorId === currentUserId;
+
+    if (contestCount > 0 || Boolean(entry.contestPenaltyApplied)) {
+      openContestDetails(entry);
+      return;
+    }
+
+    if (isOwnEntry) {
+      Alert.alert("Sem ação", "Você pode ver as contestações, mas não contestar sua própria evidência.");
+      return;
+    }
+
+    openContestModal(entry);
   };
 
   const submitContest = async () => {
@@ -804,8 +862,7 @@ export default function MyGroupsScreen() {
         if (penaltyXp > 0) {
           await adjustGroupXp(selectedGroup.id, -penaltyXp);
         }
-      }
-        // notify members that the evidence was invalidated
+        // notify members that the evidence was invalidated only after crossing the threshold
         try {
           await addDoc(collection(db, "groupNotifications", selectedGroup.id, "items"), {
             type: "invalidated",
@@ -819,6 +876,7 @@ export default function MyGroupsScreen() {
         } catch (err) {
           console.warn("failed to create invalidation notification:", err);
         }
+      }
 
       setContestModalVisible(false);
       setContestReason("");
@@ -1021,9 +1079,18 @@ export default function MyGroupsScreen() {
                     key={member.id}
                     style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: index === groupMembers.length - 1 ? 0 : 1, borderBottomColor: palette.cardBorder }}
                   >
-                    <View>
-                      <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>#{index + 1} {member.name}</Text>
-                      <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{member.actionsCount} ações</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 10, overflow: "hidden", backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+                        {usersById.get(member.id)?.avatarUrl ? (
+                          <Image source={{ uri: usersById.get(member.id)!.avatarUrl! }} style={{ width: 36, height: 36 }} contentFit="cover" />
+                        ) : (
+                          <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{(member.name || "U").split(" ").map(p => p.charAt(0)).join("").slice(0,2).toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <View>
+                        <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>#{index + 1} {member.name}</Text>
+                        <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{member.actionsCount} ações</Text>
+                      </View>
                     </View>
                     <Text style={{ color: palette.recycleAccent, fontWeight: "800" }}>{member.totalXp} XP</Text>
                   </View>
@@ -1056,13 +1123,22 @@ export default function MyGroupsScreen() {
                   <View key={entry.id} style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: invalidated ? palette.dangerBorder : palette.cardBorder, borderRadius: 24, overflow: "hidden" }}>
                     <View style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}>
                       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <View style={{ flex: 1, paddingRight: 12 }}>
-                          <Text style={{ color: palette.textPrimary, fontWeight: "900", fontSize: 15 }} numberOfLines={1}>
-                            {entry.type}
-                          </Text>
-                          <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
-                            {entry.authorName || "Membro"} • {timeLabel}
-                          </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", flex: 1, paddingRight: 12, gap: 10 }}>
+                          <View style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden", backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+                            {usersById.get(entry.authorId || "")?.avatarUrl ? (
+                              <Image source={{ uri: usersById.get(entry.authorId || "")!.avatarUrl! }} style={{ width: 40, height: 40 }} contentFit="cover" />
+                            ) : (
+                              <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>{(entry.authorName || "M").split(" ").map(p => p.charAt(0)).join("").slice(0,2).toUpperCase()}</Text>
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: palette.textPrimary, fontWeight: "900", fontSize: 15 }} numberOfLines={1}>
+                              {entry.type}
+                            </Text>
+                            <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
+                              {entry.authorName || "Membro"} • {timeLabel}
+                            </Text>
+                          </View>
                         </View>
                         <View style={{ backgroundColor: invalidated ? palette.dangerPanel : palette.recycleSoft, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
                           <Text style={{ color: invalidated ? palette.dangerText : palette.recycleAccent, fontWeight: "900", fontSize: 11 }}>{entry.xpEarned || 0} XP</Text>
@@ -1070,11 +1146,7 @@ export default function MyGroupsScreen() {
                       </View>
 
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                        {contestCount > 0 ? (
-                          <View style={{ backgroundColor: palette.panelAlt, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
-                            <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800" }}>{contestCount} contestações</Text>
-                          </View>
-                        ) : null}
+                        
                         {invalidated ? (
                           <View style={{ backgroundColor: palette.dangerPanel, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
                             <Text style={{ color: palette.dangerText, fontSize: 11, fontWeight: "800" }}>Invalidada</Text>
@@ -1099,46 +1171,32 @@ export default function MyGroupsScreen() {
                         </View>
                       ) : null}
 
-                      <View style={{ backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 12 }}>
-                        {entry.notes ? (
+                      {entry.notes ? (
+                        <View style={{ backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 12 }}>
                           <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 19 }}>{entry.notes}</Text>
-                        ) : (
-                          <Text style={{ color: palette.textMuted, fontSize: 13, lineHeight: 19 }}>Sem observações.</Text>
-                        )}
-                      </View>
-
-                      {contestReasons.length > 0 ? (
-                        <View style={{ gap: 8, marginBottom: 12 }}>
-                          {contestReasons.slice(-2).map((contest) => (
-                            <View key={`${contest.authorId}-${contest.createdAt}`} style={{ backgroundColor: palette.panelAlt, borderRadius: 14, padding: 10, borderWidth: 1, borderColor: palette.cardBorder }}>
-                              <Text style={{ color: palette.textSecondary, fontSize: 10, fontWeight: "800", marginBottom: 4 }}>
-                                {contest.authorName || "Usuário"}
-                              </Text>
-                              <Text style={{ color: palette.textPrimary, fontSize: 12, lineHeight: 17 }}>
-                                {contest.reason}
-                              </Text>
-                            </View>
-                          ))}
                         </View>
                       ) : null}
 
                       <TouchableOpacity
-                        onPress={() => openContestModal(entry)}
-                        disabled={entry.authorId === auth.currentUser?.uid}
+                        onPress={() => openContestAction(entry)}
                         style={{
                           alignSelf: "flex-start",
                           flexDirection: "row",
                           alignItems: "center",
                           gap: 8,
-                          backgroundColor: entry.authorId === auth.currentUser?.uid ? palette.panelAlt : palette.dangerPanel,
+                          backgroundColor: contestCount > 0 || invalidated ? palette.dangerPanel : palette.panelAlt,
                           borderRadius: 999,
                           paddingHorizontal: 12,
-                          paddingVertical: 10,
-                          opacity: entry.authorId === auth.currentUser?.uid ? 0.55 : 1,
+                          paddingVertical: 9,
+                          opacity: 1,
                         }}
                       >
                         <Ionicons name="alert-circle-outline" size={16} color={palette.dangerText} />
-                        <Text style={{ color: palette.dangerText, fontSize: 12, fontWeight: "800" }}>Contestar evidência</Text>
+                        {contestCount > 0 || invalidated ? (
+                          <View style={{ minWidth: 20, height: 20, borderRadius: 999, paddingHorizontal: 6, backgroundColor: "transparent", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ color: palette.dangerText, fontSize: 11, fontWeight: "900" }}>{contestCount}</Text>
+                          </View>
+                        ) : null}
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1158,8 +1216,8 @@ export default function MyGroupsScreen() {
                 borderRadius: 22,
                 padding: 12,
                 gap: 10,
-                minHeight: 400,
-                maxHeight: 440,
+                minHeight: 300,
+                maxHeight: 320,
               }}
             >
               {groupChat.length === 0 ? (
@@ -1236,17 +1294,14 @@ export default function MyGroupsScreen() {
                           gap: 10,
                         }}
                       >
-                        <View
-                          style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: 12,
-                            backgroundColor: isMine ? palette.recycleAccent : palette.panelAlt,
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <Text style={{ color: isMine ? palette.panel : palette.textPrimary, fontWeight: "900", fontSize: 11 }}>{initials}</Text>
+                        <View style={{ width: 34, height: 34, borderRadius: 12, overflow: "hidden", backgroundColor: isMine ? palette.recycleAccent : palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+                          {usersById.get(message.authorId || "")?.avatarUrl ? (
+                            <Image source={{ uri: usersById.get(message.authorId || "")!.avatarUrl! }} style={{ width: 34, height: 34 }} contentFit="cover" />
+                          ) : (
+                            <View style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}>
+                              <Text style={{ color: isMine ? palette.panel : palette.textPrimary, fontWeight: "900", fontSize: 11 }}>{initials}</Text>
+                            </View>
+                          )}
                         </View>
 
                         <View style={{ flex: 1, alignItems: isMine ? "flex-end" : "flex-start" }}>
@@ -1490,13 +1545,13 @@ export default function MyGroupsScreen() {
                 <Text style={{ color: palette.textSecondary, fontSize: 12, letterSpacing: 1, fontWeight: "700" }}>CONTESTAÇÃO</Text>
                 <Text style={{ color: palette.textPrimary, fontSize: 20, fontWeight: "900", marginTop: 2 }}>Por que esta evidência é inválida?</Text>
               </View>
-              <TouchableOpacity onPress={() => setContestModalVisible(false)} style={{ width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}>
+              <TouchableOpacity onPress={() => setContestModalVisible(false)} style={{ width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
                 <Ionicons name="close" size={18} color={palette.textPrimary} />
               </TouchableOpacity>
             </View>
 
             <TextInput
-              label="Motivo"
+              label="Motivo da contestação"
               placeholder="Explique o que torna a evidência inválida"
               value={contestReason}
               onChangeText={setContestReason}
@@ -1504,19 +1559,118 @@ export default function MyGroupsScreen() {
               mode="outlined"
               textColor={palette.textPrimary}
               placeholderTextColor={palette.textSecondary}
+              selectionColor={palette.danger}
+              cursorColor={palette.danger}
               outlineColor={palette.cardBorder}
               activeOutlineColor={palette.danger}
               theme={inputTheme}
               style={{ backgroundColor: palette.modalInput, marginBottom: 14 }}
             />
 
-            <Button mode="contained" buttonColor={palette.danger} textColor="#fff" onPress={() => void submitContest()}>
-              Enviar contestação
-            </Button>
+            <View style={{ backgroundColor: palette.panelAlt, borderRadius: 16, padding: 12, marginBottom: 14 }}>
+              <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800", marginBottom: 6 }}>Quando contestar</Text>
+              <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 18 }}>
+                Use este campo se a evidência estiver incorreta, incompleta ou não representar a ação registrada.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Button
+                mode="outlined"
+                textColor={palette.textPrimary}
+                onPress={() => setContestModalVisible(false)}
+                style={{ flex: 1, borderColor: palette.cardBorder }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor={palette.danger}
+                textColor={palette.panel}
+                onPress={() => void submitContest()}
+                style={{ flex: 1 }}
+              >
+                Enviar 
+              </Button>
+            </View>
           </View>
         </View>
       </Modal>
 
+      <Modal visible={contestDetailsVisible} transparent animationType="fade" onRequestClose={() => setContestDetailsVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.42)", justifyContent: "center", paddingHorizontal: 18 }}>
+          <View style={{ backgroundColor: palette.modalSurface, borderRadius: 22, borderWidth: 1, borderColor: palette.cardBorder, padding: 16, maxWidth: 540, width: "100%", alignSelf: "center", maxHeight: "80%" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ color: palette.textSecondary, fontSize: 11, letterSpacing: 1, fontWeight: "700" }}>CONTESTAÇÃO</Text>
+                <Text style={{ color: palette.textPrimary, fontSize: 18, fontWeight: "900", marginTop: 2 }} numberOfLines={1}>
+                  {contestDetailsTargetEntry?.type || "Evidência"}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setContestDetailsVisible(false)} style={{ width: 38, height: 38, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="close" size={18} color={palette.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            {contestDetailsTargetEntry ? (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 4 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: palette.panelAlt, borderRadius: 14, padding: 12, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: palette.textSecondary, fontSize: 11, fontWeight: "800" }}>Autor da evidência</Text>
+                    <Text style={{ color: palette.textPrimary, fontSize: 14, fontWeight: "800", marginTop: 2 }} numberOfLines={1}>
+                      {contestDetailsTargetEntry.authorName || "Membro"}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: palette.panel, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={{ color: palette.dangerText, fontSize: 11, fontWeight: "900" }}>{contestDetailsTargetEntry.contestCount || 0}x</Text>
+                  </View>
+                </View>
+
+                {Array.isArray(contestDetailsTargetEntry.contestReasons) && contestDetailsTargetEntry.contestReasons.length > 0 ? (
+                  <View style={{ gap: 8 }}>
+                    {contestDetailsTargetEntry.contestReasons.map((contest, index) => (
+                      <View key={`${contest.authorId}-${contest.createdAt}-${index}`} style={{ backgroundColor: palette.panelAlt, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: palette.cardBorder }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+                          <Text style={{ color: palette.textPrimary, fontSize: 12, fontWeight: "800", flex: 1 }} numberOfLines={1}>
+                            {contest.authorName || "Usuário"}
+                          </Text>
+                          <Text style={{ color: palette.textSecondary, fontSize: 10, fontWeight: "700" }}>
+                            {new Date(normalizeDateString(contest.createdAt)).toLocaleString("pt-BR", {
+                              day: "2-digit",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </Text>
+                        </View>
+                        <Text style={{ color: palette.textPrimary, fontSize: 13, lineHeight: 18 }}>{contest.reason}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={{ color: palette.textSecondary, fontSize: 13, paddingVertical: 8 }}>Sem contestações registradas.</Text>
+                )}
+
+                {contestDetailsTargetEntry?.authorId !== currentUserId ? (
+                  <Button
+                    mode="contained"
+                    buttonColor={palette.danger}
+                    textColor={palette.panel}
+                    onPress={() => {
+                      if (!contestDetailsTargetEntry) return;
+                      setContestDetailsVisible(false);
+                      openContestModal(contestDetailsTargetEntry);
+                    }}
+                    style={{ marginTop: 12 }}
+                  >
+                    Contestar esta evidência
+                  </Button>
+                ) : null}
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
       <Modal visible={manageMenuVisible} animationType="slide" onRequestClose={closeManageAction}>
         <View style={{ flex: 1, backgroundColor: palette.bg, paddingTop: insets.top + 12 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginBottom: 16 }}>
@@ -1542,16 +1696,17 @@ export default function MyGroupsScreen() {
 
           {canManageSelectedGroup ? (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
-              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
-                <TouchableOpacity
-                  onPress={() => setManageAction((current) => (current === "rename" ? null : "rename"))}
-                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
-                >
-                  <View style={{ flex: 1, paddingRight: 12 }}>
-                    <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar informações</Text>
-                  </View>
-                  <Ionicons name={manageAction === "rename" ? "chevron-up" : "create-outline"} size={20} color={palette.textSecondary} />
-                </TouchableOpacity>
+              <View style={{ gap: 12 }}>
+                <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
+                  <TouchableOpacity
+                    onPress={() => setManageAction((current) => (current === "rename" ? null : "rename"))}
+                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 16 }}
+                  >
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={{ color: palette.textPrimary, fontWeight: "700" }}>Alterar informações</Text>
+                    </View>
+                    <Ionicons name={manageAction === "rename" ? "chevron-up" : "create-outline"} size={20} color={palette.textSecondary} />
+                  </TouchableOpacity>
 
                 {manageAction === "rename" ? (
                   <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
@@ -1702,8 +1857,12 @@ export default function MyGroupsScreen() {
                         <View key={member.id} style={{ paddingVertical: 10, borderBottomWidth: idx < arr.length - 1 ? 1 : 0, borderBottomColor: palette.cardBorder }}>
                           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                             <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
-                              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
-                                <Text style={{ color: palette.recycleAccent, fontWeight: "900" }}>{initials}</Text>
+                              <View style={{ width: 44, height: 44, borderRadius: 12, overflow: "hidden", backgroundColor: palette.panelAlt, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                                {usersById.get(member.id)?.avatarUrl ? (
+                                  <Image source={{ uri: usersById.get(member.id)!.avatarUrl! }} style={{ width: 44, height: 44 }} contentFit="cover" />
+                                ) : (
+                                  <Text style={{ color: palette.recycleAccent, fontWeight: "900" }}>{initials}</Text>
+                                )}
                               </View>
                               <View style={{ flex: 1 }}>
                                 <Text style={{ color: palette.textPrimary, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>{member.name}</Text>
@@ -1879,7 +2038,8 @@ export default function MyGroupsScreen() {
                   </View>
                 ) : null}
               </View>
-            </ScrollView>
+            </View>
+          </ScrollView>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingBottom: insets.bottom + 28 }}>
               <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panelAlt }}>
