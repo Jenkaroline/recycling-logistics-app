@@ -150,6 +150,7 @@ export default function MyGroupsScreen() {
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [groupDurationDays, setGroupDurationDays] = useState("7");
+  const [groupDurationType, setGroupDurationType] = useState<"1w" | "1m" | "1y" | "custom" | "none">("1w");
   const [groupImageUrl, setGroupImageUrl] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<GroupTab>("stats");
@@ -177,6 +178,7 @@ export default function MyGroupsScreen() {
     setGroupName("");
     setGroupDescription("");
     setGroupDurationDays("7");
+    setGroupDurationType("1w");
     setGroupImageUrl("");
   };
 
@@ -472,12 +474,37 @@ export default function MyGroupsScreen() {
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) return;
-    const durationDays = Number.parseInt(groupDurationDays, 10);
+    let durationDays: number | undefined = undefined;
+
+    if (groupDurationType === "none") {
+      durationDays = undefined;
+    } else if (groupDurationType === "1w") {
+      durationDays = 7;
+    } else if (groupDurationType === "1m") {
+      durationDays = 30;
+    } else if (groupDurationType === "1y") {
+      durationDays = 365;
+    } else if (groupDurationType === "custom") {
+      const parsed = Number.parseInt(groupDurationDays, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        Alert.alert("Prazo inválido", "O prazo personalizado deve ser entre 1 e 365 dias.");
+        return;
+      }
+      if (parsed > 365) {
+        Alert.alert("Prazo inválido", "O prazo não pode ser maior que 365 dias.");
+        return;
+      }
+      durationDays = parsed;
+    } else {
+      const parsed = Number.parseInt(groupDurationDays, 10);
+      durationDays = Number.isFinite(parsed) && parsed > 0 ? parsed : 7;
+    }
+
     try {
       await createGroup({
         name: groupName.trim(),
         description: groupDescription.trim(),
-        durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 7,
+        durationDays: durationDays,
         imageUrl: groupImageUrl,
       });
       resetCreateForm();
@@ -1513,22 +1540,58 @@ export default function MyGroupsScreen() {
               theme={inputTheme}
               style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
             />
-            <TextInput
-              label="Duração do desafio (dias)"
-              value={groupDurationDays}
-              onChangeText={setGroupDurationDays}
-              keyboardType="number-pad"
-              mode="outlined"
-              textColor={palette.textPrimary}
-              placeholderTextColor={palette.textSecondary}
-              selectionColor={palette.recycleAccent}
-              cursorColor={palette.recycleAccent}
-              outlineColor={palette.cardBorder}
-              activeOutlineColor={palette.recycleAccent}
-              outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
-              theme={inputTheme}
-              style={{ marginBottom: 12, backgroundColor: palette.modalInput }}
-            />
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 8 }}>Prazo do desafio</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                {[
+                  { key: "1w", label: "1 semana", days: "7" },
+                  { key: "1m", label: "1 mês", days: "30" },
+                  { key: "1y", label: "1 ano", days: "365" },
+                  { key: "custom", label: "Personalizado", days: null },
+                  { key: "none", label: "Sem prazo", days: null },
+                ].map((opt) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => {
+                      setGroupDurationType(opt.key as any);
+                      if (opt.days) setGroupDurationDays(opt.days);
+                      if (opt.key === "none") setGroupDurationDays("");
+                    }}
+                    style={{
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      borderRadius: 12,
+                      backgroundColor: groupDurationType === (opt.key as any) ? palette.recycleAccent : palette.panelAlt,
+                      borderWidth: 1,
+                      borderColor: groupDurationType === (opt.key as any) ? palette.recycleAccent : palette.cardBorder,
+                    }}
+                  >
+                    <Text style={{ color: groupDurationType === (opt.key as any) ? palette.panel : palette.textSecondary }}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {groupDurationType === "custom" ? (
+                <TextInput
+                  label="Quantidade de dias (1-365)"
+                  value={groupDurationDays}
+                  onChangeText={(t) => setGroupDurationDays(t.replace(/[^0-9]/g, ""))}
+                  keyboardType="number-pad"
+                  mode="outlined"
+                  textColor={palette.textPrimary}
+                  placeholderTextColor={palette.textSecondary}
+                  selectionColor={palette.recycleAccent}
+                  cursorColor={palette.recycleAccent}
+                  outlineColor={palette.cardBorder}
+                  activeOutlineColor={palette.recycleAccent}
+                  outlineStyle={{ borderRadius: 14, borderWidth: 0.8 }}
+                  theme={inputTheme}
+                  style={{ backgroundColor: palette.modalInput }}
+                />
+              ) : null}
+              {groupDurationType === "none" ? (
+                <Text style={{ color: palette.textMuted, fontSize: 12, marginTop: 6 }}>Crie um clube para acompanhamento de atividades, sem vencedores ou prazo.</Text>
+              ) : null}
+            </View>
             <Button mode="contained" buttonColor={palette.recycleAccent} textColor={palette.panel} onPress={handleCreateGroup} style={{ marginBottom: 10 }}>
               Criar grupo
             </Button>
