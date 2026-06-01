@@ -233,37 +233,11 @@ export default function HomeScreen() {
   const [showAllIcons, setShowAllIcons] = useState(false);
   const ecopontoEnsuredRef = useRef(false);
   const currentDayKey = useCurrentDayKey();
-  const [isEndOfDay, setIsEndOfDay] = useState(() => new Date().getHours() >= 20);
 
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const scheduleNextTransition = () => {
-      const now = new Date();
-      const nextTransition = new Date(now);
-
-      if (isEndOfDay) {
-        nextTransition.setHours(24, 0, 0, 0);
-      } else {
-        nextTransition.setHours(20, 0, 0, 0);
-        if (nextTransition <= now) {
-          nextTransition.setDate(nextTransition.getDate() + 1);
-        }
-      }
-
-      timeoutId = setTimeout(() => {
-        setIsEndOfDay((current) => !current);
-      }, Math.max(0, nextTransition.getTime() - now.getTime()) + 50);
-    };
-
-    scheduleNextTransition();
-
-    return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [isEndOfDay]);
+  const isEndOfDay = useMemo(() => {
+    const now = new Date();
+    return now.getHours() >= 20;
+  }, [currentDayKey]);
 
   const todayTotal = useMemo(() => {
     return entries
@@ -323,7 +297,6 @@ export default function HomeScreen() {
 
 const ICON_OPTIONS = [
   "bottle-soda-outline",
-  "bottle-wine-outline",
   "cup-outline",
   "cup-water",
   "food-fork-drink",
@@ -340,6 +313,49 @@ const ICON_OPTIONS = [
   "trash-can-outline",
   "recycle",
   "leaf-circle-outline",
+  "recycle",
+  "recycle-variant",
+  "leaf",
+  "leaf-circle-outline",
+  "sprout",
+  "sprout-outline",
+  "tree",
+  "tree-outline",
+  "pine-tree",
+  "earth",
+  "earth-arrow-right",
+  "earth-box",
+  "earth-plus",
+  "water",
+  "water-outline",
+  "water-check",
+  "trash-can-outline",
+  "trash-can",
+  "delete-outline",
+  "dump-truck",
+  "package-variant",
+  "package-variant-closed",
+  "shopping-outline",
+  "shopping",
+  "shopping-search",
+  "bag-personal-outline",
+  "bag-suitcase-outline",
+  "bottle-tonic-outline",
+  "bottle-soda-outline",
+  "cup-water",
+  "cup-outline",
+  "lightbulb-outline",
+  "solar-power",
+  "flash-outline",
+  "battery-heart-outline",
+  "bike",
+  "walk",
+  "bus",
+  "train",
+  "car-electric",
+  "flower-outline",
+  "flower",
+  "forest"
 ];
 
   const { width } = useWindowDimensions();
@@ -1152,15 +1168,42 @@ const ICON_OPTIONS = [
               <TextInput label="Nome da categoria" value={recyclingNewTypeName} onChangeText={setRecyclingNewTypeName} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput, color: palette.textPrimary }} />
               <TextInput label="Descrição (opcional)" value={recyclingNewTypeHint} onChangeText={setRecyclingNewTypeHint} mode="outlined" style={{ marginBottom: 12, backgroundColor: palette.modalInput, color: palette.textPrimary }} />
               <Text style={{ fontSize: 14, fontWeight: "600", marginBottom: 8, color: palette.textPrimary }}>Ícone</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", marginBottom: 16 }}>
-                {ICON_OPTIONS.map((icon) => (
-                  <TouchableOpacity key={icon} onPress={() => setRecyclingNewTypeIcon(icon)} style={{ width: "20%", paddingVertical: 8, alignItems: "center", backgroundColor: recyclingNewTypeIcon === icon ? palette.modalChip : palette.modalChipIdle, borderRadius: 8, marginBottom: 8 }}>
-                    <MaterialCommunityIcons name={icon as any} size={28} color={recyclingNewTypeIcon === icon ? palette.modalChipText : palette.modalChipMuted} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Button mode="contained" onPress={handleCreateRecyclingType} disabled={!recyclingNewTypeName.trim()} style={{ marginBottom: 10 }}>Criar categoria</Button>
-              <Button mode="text" onPress={() => setRecyclingTypeModalVisible(false)}>Cancelar</Button>
+              
+      {/* Ícones */}
+<Text style={{ fontSize: 11, fontWeight: "700", letterSpacing: 0.8, color: palette.textSecondary, marginBottom: 8 }}>ÍCONE</Text>
+<Text style={{ fontSize: 11, color: palette.textMuted, marginBottom: 12 }}>
+  <MaterialCommunityIcons name="gesture-swipe-horizontal" size={12} color={palette.textMuted} /> Deslize para ver mais
+</Text>
+<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }} style={{ marginBottom: 24 }}>
+  {ICON_OPTIONS.map((icon) => {
+    const selected = newCategoryIcon === icon;
+    return (
+      <TouchableOpacity
+        key={icon}
+        onPress={() => setNewCategoryIcon(icon)}
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: 16,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: selected ? (inGoal ? palette.recycleSoft : palette.consSoft) : palette.panelAlt,
+          borderWidth: 1.5,
+          borderColor: selected ? (inGoal ? palette.recycleAccent : palette.danger) : "transparent",
+        }}
+      >
+        <MaterialCommunityIcons
+          name={icon as any}
+          size={24}
+          color={selected ? (inGoal ? palette.recycleAccent : palette.danger) : palette.textMuted}
+        />
+      </TouchableOpacity>
+    );
+  })}
+</ScrollView>
+
+              <Button mode="contained" textColor={palette.textPrimary} onPress={handleCreateRecyclingType} style={{ marginBottom: 10, backgroundColor: palette.panelAlt }}>Criar categoria</Button>
+              <Button mode="text" textColor={palette.textSecondary} onPress={() => setRecyclingTypeModalVisible(false)}>Cancelar</Button>
             </View>
           </View>
         </Modal>
