@@ -162,7 +162,7 @@ export default function HomeScreen() {
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
-  const { entries, addEntry, totalGrams, goalGrams, setGoal } = usePlasticConsumption();
+  const { entries, addEntry, totalGrams, goalGrams, setGoal, zeroConsumptionDays, confirmZeroConsumption, clearZeroConsumptionConfirmation } = usePlasticConsumption();
   const { categories, addCategory, deleteCategory } = usePlasticCategories();
   const { entries: recyclingEntries, addAction: addRecyclingAction, deleteAction: deleteRecyclingAction } = useRecycling();
   const { groups, activeGroup, activeGroupId, rankedMembers, setActiveGroup, awardXpToActiveGroup } = useRecyclingCompetition();
@@ -233,6 +233,37 @@ export default function HomeScreen() {
   const [showAllIcons, setShowAllIcons] = useState(false);
   const ecopontoEnsuredRef = useRef(false);
   const currentDayKey = useCurrentDayKey();
+  const [isEndOfDay, setIsEndOfDay] = useState(() => new Date().getHours() >= 20);
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleNextTransition = () => {
+      const now = new Date();
+      const nextTransition = new Date(now);
+
+      if (isEndOfDay) {
+        nextTransition.setHours(24, 0, 0, 0);
+      } else {
+        nextTransition.setHours(20, 0, 0, 0);
+        if (nextTransition <= now) {
+          nextTransition.setDate(nextTransition.getDate() + 1);
+        }
+      }
+
+      timeoutId = setTimeout(() => {
+        setIsEndOfDay((current) => !current);
+      }, Math.max(0, nextTransition.getTime() - now.getTime()) + 50);
+    };
+
+    scheduleNextTransition();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [isEndOfDay]);
 
   const todayTotal = useMemo(() => {
     return entries
@@ -252,8 +283,11 @@ export default function HomeScreen() {
   );
 
   const hasEntryToday = useMemo(() => {
-  return entries.some((entry) => toLocalDayKey(entry.createdAt) === currentDayKey);
+    return entries.some((entry) => toLocalDayKey(entry.createdAt) === currentDayKey);
   }, [entries, currentDayKey]);
+
+  const todayZeroConfirmed = Boolean(zeroConsumptionDays[currentDayKey]);
+  const showZeroConfirmationPrompt = isEndOfDay && !hasEntryToday && !todayZeroConfirmed;
 
   const handleAddCategory = async () => {
     const weight = Number(newCategoryWeight.replace(",", "."));
@@ -417,7 +451,7 @@ const ICON_OPTIONS = [
     [switchableGroups, currentGroup?.id],
   );
 
-  const showGroupFlow = groups.length > 0;
+  const showGroupFlow = switchableGroups.length > 0;
 
   useEffect(() => {
     if (!showGroupFlow) {
@@ -445,25 +479,48 @@ const ICON_OPTIONS = [
   const handleAddRecyclingType = async (item: { id: string; type: string; xp: number }) => {
     if (!activeGroupId) return;
 
-    const location = await captureRecyclingEvidenceLocation();
-    if (!location) return;
+    const isEcopontoType = String(item.type).trim().toLowerCase() === "descarte em ecoponto";
+    const location = isEcopontoType ? await captureRecyclingEvidenceLocation("descarte em ecoponto na Home") : null;
+    if (isEcopontoType && !location) return;
 
-    const photoUrl = await captureRecyclingEvidencePhoto();
+    const photoUrl = await captureRecyclingEvidencePhoto("registro da Home");
     if (!photoUrl) return;
 
-    const currentUser = auth.currentUser;
-    await addRecyclingAction({
-      type: item.type,
-      typeId: item.id,
-      xpEarned: item.xp,
-      groupId: activeGroupId,
-      photoUrl,
-      locationLabel: location.locationLabel,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
-    });
-    await awardXpToActiveGroup(item.xp);
+    try {
+      const currentUser = auth.currentUser;
+      console.info("[Home][Evidence] saving", {
+        typeId: item.id,
+        type: item.type,
+        groupId: activeGroupId,
+        hasLocation: Boolean(location),
+      });
+
+      await addRecyclingAction({
+        type: item.type,
+        typeId: item.id,
+        xpEarned: item.xp,
+        groupId: activeGroupId,
+        photoUrl,
+        ...(location
+          ? {
+              locationLabel: location.locationLabel,
+              latitude: location.latitude,
+              longitude: location.longitude,
+            }
+          : {}),
+        authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
+      });
+      await awardXpToActiveGroup(item.xp);
+      console.info("[Home][Evidence] saved", { typeId: item.id, groupId: activeGroupId });
+      Alert.alert("Evidência registrada", "Seu registro foi salvo com sucesso.");
+    } catch (error) {
+      console.error("[Home][Evidence] failed to save", {
+        typeId: item.id,
+        groupId: activeGroupId,
+        error,
+      });
+      Alert.alert("Falha ao registrar evidência", "Não foi possível salvar este registro agora. Verifique a conexão e tente novamente.");
+    }
   };
 
   const [recyclingTypeModalVisible, setRecyclingTypeModalVisible] = useState(false);
@@ -610,29 +667,28 @@ const ICON_OPTIONS = [
             <Ionicons name={drawerOpen ? "close" : "menu"} size={20} color={palette.textPrimary} />
           </TouchableOpacity>
 
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <TouchableOpacity
-              onPress={() => horizontalRef.current?.scrollTo({ x: 0, animated: true })}
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 999,
-                backgroundColor: pageIndex === 0 ? (inGoal ? palette.recycleAccent : palette.danger) : palette.panelAlt,
-              }}
-            />
-            <TouchableOpacity
-              onPress={() => {
-                if (!showGroupFlow) return;
-                horizontalRef.current?.scrollTo({ x: width, animated: true });
-              }}
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 999,
-                  backgroundColor: showGroupFlow && pageIndex === 1 ? palette.recycleAccent : palette.panelAlt,
-              }}
-            />
-          </View>
+          {showGroupFlow ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => horizontalRef.current?.scrollTo({ x: 0, animated: true })}
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  backgroundColor: pageIndex === 0 ? (inGoal ? palette.recycleAccent : palette.danger) : palette.panelAlt,
+                }}
+              />
+              <TouchableOpacity
+                onPress={() => horizontalRef.current?.scrollTo({ x: width, animated: true })}
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  backgroundColor: pageIndex === 1 ? palette.recycleAccent : palette.panelAlt,
+                }}
+              />
+            </View>
+          ) : null}
 
           <TouchableOpacity
             onPress={() => (navigation as any).navigate("Notificações")}
@@ -729,6 +785,42 @@ const ICON_OPTIONS = [
           <View style={{ backgroundColor: inGoal ? palette.recycleSoft : palette.dangerSoft, borderWidth: 1, borderColor: inGoal ? palette.recycleLine : palette.danger, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, alignSelf: "flex-start", marginBottom: 12 }}>
               <Text style={{ color: inGoal ? palette.recycleAccent : palette.danger, fontWeight: "700", fontSize: 12 }}>{inGoal ? "Dentro da meta" : "Meta excedida"}</Text>
             </View>
+            {showZeroConfirmationPrompt ? (
+              <View style={{ backgroundColor: palette.panelAlt, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 12, marginBottom: 12 }}>
+                <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 14 }}>Hoje foi um dia sem plástico?</Text>
+                <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 4, lineHeight: 18 }}>
+                  Confirme para registrar um dia realmente zerado. Dias sem resposta seguem como informação ausente.
+                </Text>
+                <Button
+                  mode="contained"
+                  onPress={async () => {
+                    await confirmZeroConsumption(currentDayKey);
+                  }}
+                  buttonColor={palette.recycleAccent}
+                  textColor={palette.bg}
+                  style={{ marginTop: 12, alignSelf: "flex-start", borderRadius: 999 }}
+                >
+                  Confirmar dia sem consumo
+                </Button>
+              </View>
+            ) : todayZeroConfirmed ? (
+              <View style={{ backgroundColor: palette.recycleSoft, borderWidth: 1, borderColor: palette.recycleLine, borderRadius: 18, padding: 12, marginBottom: 12 }}>
+                <Text style={{ color: palette.textPrimary, fontWeight: "800", fontSize: 14 }}>Dia sem consumo confirmado</Text>
+                <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 4, lineHeight: 18 }}>
+                  Hoje está contado como zero porque você confirmou isso explicitamente.
+                </Text>
+                <Button
+                  mode="outlined"
+                  onPress={async () => {
+                    await clearZeroConsumptionConfirmation(currentDayKey);
+                  }}
+                  textColor={palette.textPrimary}
+                  style={{ marginTop: 12, alignSelf: "flex-start", borderRadius: 999 }}
+                >
+                  Desfazer confirmação
+                </Button>
+              </View>
+            ) : null}
             <View>
           </View>
         </View>

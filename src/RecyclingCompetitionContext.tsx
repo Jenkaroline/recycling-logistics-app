@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { onAuthStateChanged, fetchSignInMethodsForEmail } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -459,6 +459,21 @@ function getCurrentUserName() {
 
 function normalizeEmail(value: string | undefined | null) {
   return value?.trim().toLowerCase() || "";
+}
+
+function normalizeLookupTerm(value: string | undefined | null) {
+  return value?.trim().toLowerCase() || "";
+}
+
+function matchesRecipientTerm(
+  data: { username?: string; email?: string; emailLower?: string },
+  normalizedTerm: string,
+) {
+  return (
+    normalizeEmail(data.email) === normalizedTerm ||
+    normalizeEmail(data.emailLower) === normalizedTerm ||
+    normalizeLookupTerm(data.username) === normalizedTerm
+  );
 }
 
 function createInvitationError(code: string, message: string) {
@@ -1141,15 +1156,15 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     });
   };
 
-  const sendGroupInvitation = async (email: string) => {
+  const sendGroupInvitation = async (recipientTerm: string) => {
     const currentUid = currentUidRef.current;
-    const trimmedEmail = normalizeEmail(email);
+    const normalizedRecipientTerm = normalizeLookupTerm(recipientTerm);
     if (!currentUid) {
       throw createInvitationError("not-authenticated", "Entre na conta para enviar convites.");
     }
 
-    if (!trimmedEmail) {
-      throw createInvitationError("invalid-email", "Informe um e-mail válido.");
+    if (!normalizedRecipientTerm) {
+      throw createInvitationError("invalid-email", "Informe um e-mail ou nome de usuário válido.");
     }
 
     const currentGroup = groupsForDisplay.find((group) => group.id === activeGroupIdRef.current);
@@ -1162,33 +1177,31 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     }
 
     const currentUserEmail = normalizeEmail(auth.currentUser?.email);
-    if (trimmedEmail === currentUserEmail) {
+    const currentUserName = normalizeLookupTerm(getCurrentUserName());
+    if (normalizedRecipientTerm === currentUserEmail || normalizedRecipientTerm === currentUserName) {
       throw createInvitationError("same-email", "Você não pode convidar seu próprio e-mail.");
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailPattern.test(trimmedEmail)) {
-      throw new Error("invalid-email");
-    }
+    const isEmailInput = emailPattern.test(normalizedRecipientTerm);
 
-    const recipientFromMemory = users.find((user) => normalizeEmail((user as any).email) === trimmedEmail || normalizeEmail((user as any).emailLower) === trimmedEmail);
+    const recipientFromMemory = users.find((user) => matchesRecipientTerm({
+      username: user.username,
+      email: user.email,
+      emailLower: (user as any).emailLower,
+    }, normalizedRecipientTerm));
     let recipient = recipientFromMemory
       ? {
           uid: recipientFromMemory.uid,
           username: recipientFromMemory.username || "Usuario",
-          email: normalizeEmail(recipientFromMemory.email) || trimmedEmail,
+          email: normalizeEmail(recipientFromMemory.email) || normalizedRecipientTerm,
         }
       : null;
 
     try {
-      let exactMatchSnapshot: any = null;
-      let exactMatchByEmail: any = null;
-      let allUsersSnapshot: any = null;
-
-      if (!recipient) {
-        // Try direct lookup on normalized email field (preferred)
-        exactMatchSnapshot = await getDocs(
-          query(collection(db, "users"), where("emailLower", "==", trimmedEmail), limit(1)),
+      if (!recipient && isEmailInput) {
+        const exactMatchSnapshot = await getDocs(
+          query(collection(db, "users"), where("emailLower", "==", normalizedRecipientTerm), limit(1)),
         );
 
         if (!exactMatchSnapshot.empty) {
@@ -1197,14 +1210,13 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
           recipient = {
             uid: snap.id,
             username: data.username || "Usuario",
-            email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+            email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
           };
         }
 
-        // If still not found, try matching plain `email` field (some records may not have emailLower)
         if (!recipient) {
-          exactMatchByEmail = await getDocs(
-            query(collection(db, "users"), where("email", "==", trimmedEmail), limit(1)),
+          const exactMatchByEmail = await getDocs(
+            query(collection(db, "users"), where("email", "==", normalizedRecipientTerm), limit(1)),
           );
           if (!exactMatchByEmail.empty) {
             const snap = exactMatchByEmail.docs[0];
@@ -1212,17 +1224,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
             recipient = {
               uid: snap.id,
               username: data.username || "Usuario",
-              email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+              email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
             };
           }
         }
       }
 
       if (!recipient) {
-        allUsersSnapshot = await getDocs(collection(db, "users"));
+        const allUsersSnapshot = await getDocs(collection(db, "users"));
         const fallbackDoc = allUsersSnapshot.docs.find((snap) => {
-          const data = snap.data() as { email?: string; emailLower?: string };
-          return normalizeEmail(data.emailLower || data.email) === trimmedEmail;
+          const data = snap.data() as { username?: string; email?: string; emailLower?: string };
+          return matchesRecipientTerm(data, normalizedRecipientTerm);
         });
 
         if (fallbackDoc) {
@@ -1230,12 +1242,9 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
           recipient = {
             uid: fallbackDoc.id,
             username: data.username || "Usuario",
-            email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+            email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
           };
         }
-      }
-
-      if (!recipient) {
       }
     } catch (error) {
       throw createInvitationError(
@@ -1244,35 +1253,10 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       );
     }
 
-    const currentUserName = getCurrentUserName();
-
     if (!recipient) {
       throw createInvitationError(
         "not-found",
         "Não encontramos essa pessoa no app. Peça para ela se cadastrar e tente novamente.",
-      );
-    }
-
-    // ensure the email still corresponds to an active auth account
-    try {
-      const methods = await fetchSignInMethodsForEmail(auth, recipient.email || trimmedEmail);
-      if (!methods || methods.length === 0) {
-        throw createInvitationError(
-          "not-found",
-          "Não foi possível enviar convite para uma conta inexistente ou excluída.",
-        );
-      }
-    } catch (err) {
-      // If fetchSignInMethodsForEmail fails due to invalid email, propagate lookup-failed
-      const code = (err as { code?: string })?.code;
-      if (code === "auth/invalid-email" || code === "invalid-email") {
-        throw createInvitationError("invalid-email", "Digite um e-mail válido.");
-      }
-      // For other errors, surface as lookup failure
-      if ((err as { message?: string })?.message) console.warn("[sendGroupInvitation] fetchSignInMethods error", err);
-      throw createInvitationError(
-        "lookup-failed",
-        "Não foi possível validar o e-mail agora. Verifique sua conexão e tente novamente.",
       );
     }
 
@@ -1300,8 +1284,8 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       ownerName: currentUserName,
       ownerEmail: currentUserEmail,
       recipientUid: recipient.uid,
-      recipientEmail: (recipient.email || trimmedEmail).toLowerCase(),
-      recipientName: recipient.username?.trim() || trimmedEmail.split("@")[0],
+      recipientEmail: (recipient.email || normalizedRecipientTerm).toLowerCase(),
+      recipientName: recipient.username?.trim() || normalizedRecipientTerm.split("@")[0],
       membersSnapshot: currentGroup.members.map((member) => ({
         ...member,
         totalXp: Number(member.totalXp || 0),
@@ -1316,7 +1300,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     };
 
     console.info("[sendGroupInvitation] resolved recipient", {
-      email: trimmedEmail,
+      email: normalizedRecipientTerm,
       groupId: currentGroup.id,
       recipientUid: recipient.uid,
       recipientEmail: recipient.email,
@@ -1376,17 +1360,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       eventType: "member_invite",
       resourceType: "recycling_group",
       resourceId: currentGroup.id,
-      payload: { recipientEmail: trimmedEmail },
+      payload: { recipientEmail: normalizedRecipientTerm },
     });
     await appendGroupHistory(currentGroup.id, "member_invited", {
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
       recipientUid: recipient.uid,
     });
 
     console.info("[sendGroupInvitation] invite created", {
       groupId: currentGroup.id,
       groupName: currentGroup.name,
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
       recipientUid: recipient.uid,
       inviteId,
     });
@@ -1396,7 +1380,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       recipientFound: true,
       delivered: true,
       inviteId,
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
     };
   };
 

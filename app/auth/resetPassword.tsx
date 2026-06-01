@@ -71,22 +71,41 @@ export default function ResetPasswordScreen() {
     setError("");
     setStatusMessage("");
     const normalizedEmail = email.trim().toLowerCase();
+    console.info("[ResetPassword] handleSendReset start", { normalizedEmail });
 
     if (!normalizedEmail) {
       setError("E-mail é obrigatório!");
+      console.warn("[ResetPassword] blocked: empty email");
       return;
     }
     if (!isValidEmail(normalizedEmail)) {
       setError("Digite um e-mail válido para recuperar a senha.");
+      console.warn("[ResetPassword] blocked: invalid email format", { normalizedEmail });
       return;
     }
     setIsSending(true);
     try {
+      console.info("[ResetPassword] validating account existence", {
+        inputEmail: normalizedEmail,
+      });
+
       const signInMethods = await fetchSignInMethodsForEmail(auth, normalizedEmail);
+      console.info("[ResetPassword] validation result", {
+        inputEmail: normalizedEmail,
+        methodsCount: signInMethods.length,
+      });
+
       if (signInMethods.length === 0) {
+        console.warn("[ResetPassword] account not registered in app", {
+          inputEmail: normalizedEmail,
+        });
         setError("Não encontramos uma conta cadastrada com esse e-mail no app. Confira o endereço ou crie uma conta.");
         return;
       }
+
+      console.info("[ResetPassword] sending password reset", {
+        inputEmail: normalizedEmail,
+      });
 
       const redirectUrl = "https://jenkaroline.github.io/recycling-logistics-app/action/";
       const actionCodeSettings = {
@@ -95,13 +114,21 @@ export default function ResetPasswordScreen() {
         handleCodeInApp: true,
       } as any;
       await sendPasswordResetEmail(auth, normalizedEmail, actionCodeSettings);
+      console.info("[ResetPassword] reset email sent", {
+        inputEmail: normalizedEmail,
+      });
       setStatusMessage("E-mail de redefinição enviado. Verifique sua caixa de entrada.");
     } catch (err: any) {
       const code = err?.code?.toString?.() || "";
+      console.warn("[ResetPassword] send reset failed", {
+        inputEmail: normalizedEmail,
+        code,
+        message: err?.message || String(err),
+      });
       if (code === "auth/invalid-email") {
         setError("Digite um e-mail válido para recuperar a senha.");
       } else if (code === "auth/user-not-found") {
-        setError("Não encontramos uma conta com esse e-mail no app.");
+        setError("Não encontramos uma conta cadastrada com esse e-mail no app. Confira o endereço ou crie uma conta.");
       } else if (code === "auth/too-many-requests") {
         setError("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
       } else if (code === "auth/network-request-failed") {

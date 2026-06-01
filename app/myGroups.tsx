@@ -15,7 +15,7 @@ import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
-import { captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
+import { captureRecyclingEvidenceLocation, captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { db } from "../service/firebaseConfig";
 
 type GroupTab = "stats" | "feed" | "chat";
@@ -171,8 +171,10 @@ export default function MyGroupsScreen() {
   const [evidenceNoteVisible, setEvidenceNoteVisible] = useState(false);
   const [evidenceNoteText, setEvidenceNoteText] = useState("");
   const [pendingEvidencePhoto, setPendingEvidencePhoto] = useState<string | null>(null);
+  const [pendingEvidenceLocation, setPendingEvidenceLocation] = useState<{ latitude: number; longitude: number; locationLabel: string } | null>(null);
   const [pendingEvidenceItem, setPendingEvidenceItem] = useState<{ id: string; type: string; xp: number } | null>(null);
   const chatScrollRef = useRef<ScrollView | null>(null);
+  const consumedRouteGroupIdRef = useRef<string | null>(null);
 
   const resetCreateForm = () => {
     setGroupName("");
@@ -308,10 +310,13 @@ export default function MyGroupsScreen() {
     const routeTab = route?.params?.tab;
     if (!routeGroupId) return;
     if (!groups.some((group) => group.id === routeGroupId)) return;
+    if (consumedRouteGroupIdRef.current === routeGroupId) return;
 
+    consumedRouteGroupIdRef.current = routeGroupId;
     setSelectedGroupId(routeGroupId);
     setSelectedTab(routeTab === "stats" ? "stats" : "stats");
     void setActiveGroup(routeGroupId);
+    navigation.setParams({ groupId: undefined, tab: undefined });
   }, [route?.params?.groupId, route?.params?.tab, groups, setActiveGroup]);
 
   useEffect(() => {
@@ -611,23 +616,23 @@ export default function MyGroupsScreen() {
 
   const handleAddMember = async () => {
     if (!selectedGroup) return;
-    const inputEmail = manageMemberName.trim().toLowerCase();
-    if (!inputEmail) return;
+    const recipientInput = manageMemberName.trim();
+    if (!recipientInput) return;
 
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailPattern.test(inputEmail)) {
-      Alert.alert("E-mail inválido", "Digite um e-mail válido para adicionar a pessoa.");
+    const normalizedRecipientInput = recipientInput.toLowerCase();
+    if (!normalizedRecipientInput) {
+      Alert.alert("Campo obrigatório", "Informe um e-mail ou nome de usuário para adicionar a pessoa.");
       return;
     }
 
     try {
-      const result = await sendGroupInvitation(inputEmail);
+      const result = await sendGroupInvitation(normalizedRecipientInput);
       setManageAction(null);
       setManageMenuVisible(false);
       setManageMemberName("");
 
       if (!result.persisted || !result.recipientFound || !result.delivered) {
-        Alert.alert("Falha ao enviar", `O e-mail ${inputEmail} precisa estar cadastrado no app para receber o convite.`);
+        Alert.alert("Falha ao enviar", `A pessoa ${recipientInput} precisa estar cadastrada no app para receber o convite.`);
         return;
       }
 
@@ -637,12 +642,12 @@ export default function MyGroupsScreen() {
       const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
 
       if (errorCode === "same-email") {
-        Alert.alert("E-mail inválido", "Você não pode convidar o seu próprio e-mail.");
+        Alert.alert("Entrada inválida", "Você não pode convidar a si mesmo.");
         return;
       }
 
       if (errorCode === "invalid-email" || errorMessage === "invalid-email") {
-        Alert.alert("E-mail inválido", "Digite um e-mail válido para enviar o convite.");
+        Alert.alert("Entrada inválida", "Digite um e-mail ou nome de usuário válido para enviar o convite.");
         return;
       }
 
@@ -672,7 +677,7 @@ export default function MyGroupsScreen() {
       }
 
       if (errorCode === "lookup-failed") {
-        Alert.alert("Não foi possível validar", "Não conseguimos confirmar esse e-mail agora. Verifique sua conexão e tente novamente.");
+        Alert.alert("Não foi possível validar", "Não conseguimos confirmar esse cadastro agora. Verifique sua conexão e tente novamente.");
         return;
       }
 
@@ -682,7 +687,7 @@ export default function MyGroupsScreen() {
       }
 
       console.error("[MyGroups] failed to send invitation", {
-        email: inputEmail,
+        email: normalizedRecipientInput,
         groupId: selectedGroup.id,
         errorCode: errorCode || "unknown",
       });
@@ -746,42 +751,47 @@ export default function MyGroupsScreen() {
 
   const handleAddGroupRecord = async (item: { id: string; type: string; xp: number }) => {
     if (!selectedGroup) return;
-    const photoUrl = await captureRecyclingEvidencePhoto();
+    const isEcopontoType = String(item.type).trim().toLowerCase() === "descarte em ecoponto";
+    const evidenceLocation = isEcopontoType ? await captureRecyclingEvidenceLocation("descarte em ecoponto no grupo") : null;
+    if (isEcopontoType && !evidenceLocation) return;
+
+    const photoUrl = await captureRecyclingEvidencePhoto("registro do grupo");
     if (!photoUrl) return;
-
-    // store pending evidence and open note modal
-    setPendingEvidencePhoto(photoUrl);
-    setPendingEvidenceItem(item);
-    setEvidenceNoteText("");
-    setEvidenceNoteVisible(true);
-  };
-
-  const sendPendingEvidence = async () => {
-    if (!selectedGroup || !pendingEvidenceItem || !pendingEvidencePhoto) {
-      setEvidenceNoteVisible(false);
-      setPendingEvidenceItem(null);
-      setPendingEvidencePhoto(null);
-      return;
-    }
 
     try {
       const currentUser = auth.currentUser;
-      await addRecyclingAction({
-        type: pendingEvidenceItem.type,
-        typeId: pendingEvidenceItem.id,
+      console.info("[MyGroups][Evidence] saving", {
+        typeId: item.id,
+        type: item.type,
         groupId: selectedGroup.id,
-        photoUrl: pendingEvidencePhoto,
+        hasLocation: Boolean(evidenceLocation),
+      });
+      await addRecyclingAction({
+        type: item.type,
+        typeId: item.id,
+        groupId: selectedGroup.id,
+        photoUrl,
+        ...(evidenceLocation
+          ? {
+              locationLabel: evidenceLocation.locationLabel,
+              latitude: evidenceLocation.latitude,
+              longitude: evidenceLocation.longitude,
+            }
+          : {}),
         authorName: currentUser?.displayName?.trim() || currentUser?.email?.split("@")[0] || "Você",
-        xpEarned: pendingEvidenceItem.xp,
-        notes: evidenceNoteText.trim() || undefined,
+        xpEarned: item.xp,
       });
 
-      await awardXpToActiveGroup(pendingEvidenceItem.xp);
-      setEvidenceNoteVisible(false);
-      setPendingEvidenceItem(null);
-      setPendingEvidencePhoto(null);
+      await awardXpToActiveGroup(item.xp);
+      console.info("[MyGroups][Evidence] saved", { typeId: item.id, groupId: selectedGroup.id });
+      Alert.alert("Evidência registrada", "Seu registro foi salvo com sucesso.");
       navigation.navigate("Home", { tab: "recycling", groupId: selectedGroup.id });
     } catch (error) {
+      console.error("[MyGroups][Evidence] failed to save", {
+        typeId: item.id,
+        groupId: selectedGroup.id,
+        error,
+      });
       Alert.alert("Falha ao registrar evidência", translateFirebaseError(error));
     }
   };
@@ -1008,7 +1018,11 @@ export default function MyGroupsScreen() {
       >
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <TouchableOpacity
-            onPress={() => setSelectedGroupId(null)}
+            onPress={() => {
+              consumedRouteGroupIdRef.current = null;
+              setSelectedGroupId(null);
+              navigation.setParams({ groupId: undefined, tab: undefined });
+            }}
             style={{ width: 42, height: 42, borderRadius: 12, borderWidth: 1, borderColor: palette.cardBorder, backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}
           >
             <Ionicons name="arrow-back" size={20} color={palette.textPrimary} />
@@ -1868,7 +1882,7 @@ export default function MyGroupsScreen() {
                 {manageAction === "addMember" ? (
                   <View style={{ backgroundColor: palette.panel, borderTopWidth: 1, borderTopColor: palette.cardBorder, padding: 14 }}>
                     <TextInput
-                      label="E-mail da pessoa"
+                      label="E-mail ou nome de usuário"
                       value={manageMemberName}
                       onChangeText={(value) => setManageMemberName(value.replace(/\s+/g, ""))}
                       mode="outlined"
@@ -1886,7 +1900,7 @@ export default function MyGroupsScreen() {
                       mode="contained"
                       onPress={async () => {
                         if (!manageMemberName.trim()) {
-                          Alert.alert("Preencha o e-mail", "Informe o e-mail da pessoa para enviar o convite.");
+                          Alert.alert("Preencha o campo", "Informe o e-mail ou nome de usuário da pessoa para enviar o convite.");
                           return;
                         }
                         await handleAddMember();
