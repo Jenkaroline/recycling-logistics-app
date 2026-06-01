@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Button } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { auth } from "../../service/firebaseConfig";
 import { translateFirebaseError } from "../../src/firebaseErrorMapper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
@@ -23,6 +24,7 @@ type RootStackParamList = {
 
 export default function VerifyEmailScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const router = useRouter();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const { top: insetTop } = useSafeAreaInsets();
@@ -147,7 +149,7 @@ export default function VerifyEmailScreen() {
             console.warn("[verify-email][email-change] signOut failed", signOutError);
           }
         }
-        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+        router.replace("/auth/login");
         return;
       }
 
@@ -156,7 +158,7 @@ export default function VerifyEmailScreen() {
         const refreshedUser = auth.currentUser ?? currentUser;
         const emailMatchesPending = verificationFlow !== "email-change" || !pendingEmail || refreshedUser.email === pendingEmail;
         if (refreshedUser.emailVerified && emailMatchesPending) {
-          navigation.reset({ index: 0, routes: [{ name: "Main" }] });
+          router.replace("/");
         } else {
           setError(
             "E-mail ainda não verificado. Se você acabou de confirmar no link, aguarde alguns segundos e tente novamente.",
@@ -214,7 +216,7 @@ export default function VerifyEmailScreen() {
           if ((navigation as any).canGoBack && (navigation as any).canGoBack()) {
             navigation.goBack();
           } else {
-            navigation.navigate("Login");
+            router.replace("/auth/login");
           }
         }}
         style={[styles.backButton, { top: insetTop + 10 }]}

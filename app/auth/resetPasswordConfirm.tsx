@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { StackScreenProps } from "@react-navigation/stack";
+import { useRouter } from "expo-router";
 import { verifyPasswordResetCode, confirmPasswordReset } from "firebase/auth";
 import { auth } from "../../service/firebaseConfig";
 import { translateFirebaseError } from "../../src/firebaseErrorMapper";
@@ -11,6 +12,7 @@ import ErrorMessage from "../components/ErrorMessage";
 type Props = StackScreenProps<any, any>;
 
 export default function ResetPasswordConfirmScreen({ route, navigation }: Props) {
+  const router = useRouter();
   const { darkModeEnabled } = useThemePreference();
   const [oobCode, setOobCode] = useState<string | undefined>(
     (route?.params as any)?.oobCode
@@ -52,7 +54,7 @@ export default function ResetPasswordConfirmScreen({ route, navigation }: Props)
     setIsSubmitting(true);
     try {
       await confirmPasswordReset(auth, oobCode, newPassword);
-      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+      router.replace("/auth/login");
     } catch (err: any) {
       setError(translateFirebaseError(err));
     } finally {

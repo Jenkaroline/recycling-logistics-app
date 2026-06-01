@@ -63,6 +63,10 @@ type GroupInvitation = {
   id: string;
   groupId: string;
   groupName: string;
+  groupDescription?: string;
+  groupImageUrl?: string;
+  groupDurationDays?: number;
+  groupChallengeEndsAt?: string | null;
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
@@ -246,10 +250,10 @@ function buildAcceptedInvitationGroup(invitation: GroupInvitation): CompetitionG
   return normalizeGroup({
     id: invitation.groupId,
     name: invitation.groupName,
-    description: "",
-    imageUrl: "",
-    durationDays: undefined,
-    challengeEndsAt: null,
+    description: invitation.groupDescription || "",
+    imageUrl: invitation.groupImageUrl || "",
+    durationDays: invitation.groupDurationDays,
+    challengeEndsAt: invitation.groupChallengeEndsAt ?? null,
     createdAt: invitation.groupCreatedAt,
     ownerId: invitation.ownerId,
     isActive: true,
@@ -426,6 +430,28 @@ function normalizeInvitation(invitation: GroupInvitation & { createdAt?: unknown
   };
 }
 
+function buildInvitationMetadata(group: Pick<CompetitionGroup, "name" | "description" | "imageUrl" | "durationDays" | "challengeEndsAt">) {
+  return {
+    groupName: group.name,
+    groupDescription: group.description || "",
+    groupImageUrl: group.imageUrl || "",
+    groupDurationDays: group.durationDays ?? undefined,
+    groupChallengeEndsAt: group.challengeEndsAt ?? null,
+  };
+}
+
+function buildInvitationMetadataPatch(input: Partial<Pick<CompetitionGroup, "name" | "description" | "imageUrl" | "durationDays" | "challengeEndsAt">>) {
+  const patch: Record<string, unknown> = {};
+
+  if (typeof input.name === "string") patch.groupName = input.name;
+  if (typeof input.description === "string") patch.groupDescription = input.description;
+  if (typeof input.imageUrl === "string") patch.groupImageUrl = input.imageUrl;
+  if (input.durationDays !== undefined) patch.groupDurationDays = input.durationDays;
+  if (input.challengeEndsAt !== undefined) patch.groupChallengeEndsAt = input.challengeEndsAt;
+
+  return patch;
+}
+
 function getCurrentUserName() {
   const user = auth.currentUser;
   return user?.displayName?.trim() || user?.email?.split("@")[0] || "Você";
@@ -433,6 +459,21 @@ function getCurrentUserName() {
 
 function normalizeEmail(value: string | undefined | null) {
   return value?.trim().toLowerCase() || "";
+}
+
+function normalizeLookupTerm(value: string | undefined | null) {
+  return value?.trim().toLowerCase() || "";
+}
+
+function matchesRecipientTerm(
+  data: { username?: string; email?: string; emailLower?: string },
+  normalizedTerm: string,
+) {
+  return (
+    normalizeEmail(data.email) === normalizedTerm ||
+    normalizeEmail(data.emailLower) === normalizedTerm ||
+    normalizeLookupTerm(data.username) === normalizedTerm
+  );
 }
 
 function createInvitationError(code: string, message: string) {
@@ -896,6 +937,24 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     await deleteDoc(doc(db, "groups", groupId));
   };
 
+  const syncGroupMetadataToInvitations = async (
+    groupId: string,
+    metadata: Partial<Pick<CompetitionGroup, "name" | "description" | "imageUrl" | "durationDays" | "challengeEndsAt">>,
+  ) => {
+    const invitationsForGroup = ownedInvitations.filter((invitation) => invitation.groupId === groupId);
+    if (invitationsForGroup.length === 0) return;
+
+    const metadataPatch = buildInvitationMetadataPatch(metadata);
+    if (Object.keys(metadataPatch).length === 0) return;
+
+    await Promise.all(
+      invitationsForGroup.map(async (invitation) => {
+        await setDoc(doc(db, "users", invitation.ownerId, "groupInvitationsSent", invitation.id), metadataPatch, { merge: true });
+        await setDoc(doc(db, "users", invitation.recipientUid, "groupInvitationsReceived", invitation.id), metadataPatch, { merge: true });
+      }),
+    );
+  };
+
   const createGroup = async (input: {
     name: string;
     description?: string;
@@ -1027,6 +1086,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     if (!trimmed) return;
 
     await propagateGroupUpdate(groupId, { name: trimmed });
+    await syncGroupMetadataToInvitations(groupId, { name: trimmed });
     await appendGroupHistory(groupId, "group_updated", { name: trimmed });
     void recordAuditEvent({
       eventType: "update",
@@ -1069,6 +1129,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
 
     // propagate changes to all members so updates are visible to everyone
     await propagateGroupUpdate(groupId, payload);
+    await syncGroupMetadataToInvitations(groupId, payload);
     await appendGroupHistory(groupId, "group_updated", auditPayload);
     void recordAuditEvent({
       eventType: "update",
@@ -1095,15 +1156,15 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     });
   };
 
-  const sendGroupInvitation = async (email: string) => {
+  const sendGroupInvitation = async (recipientTerm: string) => {
     const currentUid = currentUidRef.current;
-    const trimmedEmail = normalizeEmail(email);
+    const normalizedRecipientTerm = normalizeLookupTerm(recipientTerm);
     if (!currentUid) {
       throw createInvitationError("not-authenticated", "Entre na conta para enviar convites.");
     }
 
-    if (!trimmedEmail) {
-      throw createInvitationError("invalid-email", "Informe um e-mail válido.");
+    if (!normalizedRecipientTerm) {
+      throw createInvitationError("invalid-email", "Informe um e-mail ou nome de usuário válido.");
     }
 
     const currentGroup = groupsForDisplay.find((group) => group.id === activeGroupIdRef.current);
@@ -1116,33 +1177,31 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     }
 
     const currentUserEmail = normalizeEmail(auth.currentUser?.email);
-    if (trimmedEmail === currentUserEmail) {
+    const currentUserName = normalizeLookupTerm(getCurrentUserName());
+    if (normalizedRecipientTerm === currentUserEmail || normalizedRecipientTerm === currentUserName) {
       throw createInvitationError("same-email", "Você não pode convidar seu próprio e-mail.");
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailPattern.test(trimmedEmail)) {
-      throw new Error("invalid-email");
-    }
+    const isEmailInput = emailPattern.test(normalizedRecipientTerm);
 
-    const recipientFromMemory = users.find((user) => normalizeEmail((user as any).email) === trimmedEmail || normalizeEmail((user as any).emailLower) === trimmedEmail);
+    const recipientFromMemory = users.find((user) => matchesRecipientTerm({
+      username: user.username,
+      email: user.email,
+      emailLower: (user as any).emailLower,
+    }, normalizedRecipientTerm));
     let recipient = recipientFromMemory
       ? {
           uid: recipientFromMemory.uid,
           username: recipientFromMemory.username || "Usuario",
-          email: normalizeEmail(recipientFromMemory.email) || trimmedEmail,
+          email: normalizeEmail(recipientFromMemory.email) || normalizedRecipientTerm,
         }
       : null;
 
     try {
-      let exactMatchSnapshot: any = null;
-      let exactMatchByEmail: any = null;
-      let allUsersSnapshot: any = null;
-
-      if (!recipient) {
-        // Try direct lookup on normalized email field (preferred)
-        exactMatchSnapshot = await getDocs(
-          query(collection(db, "users"), where("emailLower", "==", trimmedEmail), limit(1)),
+      if (!recipient && isEmailInput) {
+        const exactMatchSnapshot = await getDocs(
+          query(collection(db, "users"), where("emailLower", "==", normalizedRecipientTerm), limit(1)),
         );
 
         if (!exactMatchSnapshot.empty) {
@@ -1151,14 +1210,13 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
           recipient = {
             uid: snap.id,
             username: data.username || "Usuario",
-            email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+            email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
           };
         }
 
-        // If still not found, try matching plain `email` field (some records may not have emailLower)
         if (!recipient) {
-          exactMatchByEmail = await getDocs(
-            query(collection(db, "users"), where("email", "==", trimmedEmail), limit(1)),
+          const exactMatchByEmail = await getDocs(
+            query(collection(db, "users"), where("email", "==", normalizedRecipientTerm), limit(1)),
           );
           if (!exactMatchByEmail.empty) {
             const snap = exactMatchByEmail.docs[0];
@@ -1166,17 +1224,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
             recipient = {
               uid: snap.id,
               username: data.username || "Usuario",
-              email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+              email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
             };
           }
         }
       }
 
       if (!recipient) {
-        allUsersSnapshot = await getDocs(collection(db, "users"));
+        const allUsersSnapshot = await getDocs(collection(db, "users"));
         const fallbackDoc = allUsersSnapshot.docs.find((snap) => {
-          const data = snap.data() as { email?: string; emailLower?: string };
-          return normalizeEmail(data.emailLower || data.email) === trimmedEmail;
+          const data = snap.data() as { username?: string; email?: string; emailLower?: string };
+          return matchesRecipientTerm(data, normalizedRecipientTerm);
         });
 
         if (fallbackDoc) {
@@ -1184,12 +1242,9 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
           recipient = {
             uid: fallbackDoc.id,
             username: data.username || "Usuario",
-            email: normalizeEmail(data.emailLower || data.email) || trimmedEmail,
+            email: normalizeEmail(data.emailLower || data.email) || normalizedRecipientTerm,
           };
         }
-      }
-
-      if (!recipient) {
       }
     } catch (error) {
       throw createInvitationError(
@@ -1197,8 +1252,6 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         "Não foi possível validar o e-mail agora. Verifique sua conexão e tente novamente.",
       );
     }
-
-    const currentUserName = getCurrentUserName();
 
     if (!recipient) {
       throw createInvitationError(
@@ -1226,13 +1279,13 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     const inviteData = {
       id: inviteId,
       groupId: currentGroup.id,
-      groupName: currentGroup.name,
+      ...buildInvitationMetadata(currentGroup),
       ownerId: currentUid,
       ownerName: currentUserName,
       ownerEmail: currentUserEmail,
       recipientUid: recipient.uid,
-      recipientEmail: (recipient.email || trimmedEmail).toLowerCase(),
-      recipientName: recipient.username?.trim() || trimmedEmail.split("@")[0],
+      recipientEmail: (recipient.email || normalizedRecipientTerm).toLowerCase(),
+      recipientName: recipient.username?.trim() || normalizedRecipientTerm.split("@")[0],
       membersSnapshot: currentGroup.members.map((member) => ({
         ...member,
         totalXp: Number(member.totalXp || 0),
@@ -1247,7 +1300,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     };
 
     console.info("[sendGroupInvitation] resolved recipient", {
-      email: trimmedEmail,
+      email: normalizedRecipientTerm,
       groupId: currentGroup.id,
       recipientUid: recipient.uid,
       recipientEmail: recipient.email,
@@ -1263,6 +1316,30 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
     batch.set(doc(db, "users", currentUid, "groupInvitationsSent", inviteId), inviteData, { merge: true });
     batch.set(doc(db, "users", recipient.uid, "groupInvitationsReceived", inviteId), inviteData, { merge: true });
     await batch.commit();
+
+    try {
+      await setDoc(
+        doc(db, "users", recipient.uid, "competitionNotifications", inviteId),
+        {
+          type: "group-invitation",
+          sourceId: inviteId,
+          groupId: currentGroup.id,
+          groupName: currentGroup.name,
+          title: `Convite para ${currentGroup.name}`,
+          description: `${currentUserName} convidou você para participar deste grupo.`,
+          actorId: currentUid,
+          actorName: currentUserName,
+          recipientUid: recipient.uid,
+          ownerId: currentUid,
+          status: "pending",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (notificationError) {
+      console.warn("[sendGroupInvitation] failed to persist competition notification", notificationError);
+    }
 
     console.info("[sendGroupInvitation] batch committed", {
       inviteId,
@@ -1283,17 +1360,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       eventType: "member_invite",
       resourceType: "recycling_group",
       resourceId: currentGroup.id,
-      payload: { recipientEmail: trimmedEmail },
+      payload: { recipientEmail: normalizedRecipientTerm },
     });
     await appendGroupHistory(currentGroup.id, "member_invited", {
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
       recipientUid: recipient.uid,
     });
 
     console.info("[sendGroupInvitation] invite created", {
       groupId: currentGroup.id,
       groupName: currentGroup.name,
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
       recipientUid: recipient.uid,
       inviteId,
     });
@@ -1303,7 +1380,7 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       recipientFound: true,
       delivered: true,
       inviteId,
-      recipientEmail: trimmedEmail,
+      recipientEmail: normalizedRecipientTerm,
     };
   };
 
@@ -1313,28 +1390,35 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
 
     const invitation = receivedInvitations.find((item) => item.id === invitationId && item.recipientUid === uid);
     if (!invitation || invitation.status !== "pending") return;
-
-    await persistActiveGroupId(invitation.groupId);
-
     const statusUpdate = {
       status: "accepted" as const,
       respondedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(doc(db, "users", invitation.ownerId, "groupInvitationsSent", invitation.id), statusUpdate, { merge: true });
-    await setDoc(doc(db, "users", uid, "groupInvitationsReceived", invitation.id), statusUpdate, { merge: true });
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, "users", invitation.ownerId, "groupInvitationsSent", invitation.id), statusUpdate, { merge: true });
+      batch.set(doc(db, "users", uid, "groupInvitationsReceived", invitation.id), statusUpdate, { merge: true });
+      await batch.commit();
 
-    void recordAuditEvent({
-      eventType: "member_invite_accept",
-      resourceType: "recycling_group",
-      resourceId: invitation.groupId,
-      payload: { invitationId },
-    });
-    await appendGroupHistory(invitation.groupId, "member_invite_accepted", {
-      invitationId,
-      recipientUid: uid,
-    });
+      // only persist active group if the invitation update succeeded
+      await persistActiveGroupId(invitation.groupId);
+
+      void recordAuditEvent({
+        eventType: "member_invite_accept",
+        resourceType: "recycling_group",
+        resourceId: invitation.groupId,
+        payload: { invitationId },
+      });
+      await appendGroupHistory(invitation.groupId, "member_invite_accepted", {
+        invitationId,
+        recipientUid: uid,
+      });
+    } catch (err) {
+      console.error("[acceptGroupInvitation] failed to accept invitation", { invitationId, err });
+      throw createInvitationError("accept-failed", "Não foi possível aceitar o convite no momento. Tente novamente.");
+    }
   };
 
   const declineGroupInvitation = async (invitationId: string) => {
@@ -1349,20 +1433,26 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
       respondedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, "users", invitation.ownerId, "groupInvitationsSent", invitation.id), statusUpdate, { merge: true });
+      batch.set(doc(db, "users", uid, "groupInvitationsReceived", invitation.id), statusUpdate, { merge: true });
+      await batch.commit();
 
-    await setDoc(doc(db, "users", invitation.ownerId, "groupInvitationsSent", invitation.id), statusUpdate, { merge: true });
-    await setDoc(doc(db, "users", uid, "groupInvitationsReceived", invitation.id), statusUpdate, { merge: true });
-
-    void recordAuditEvent({
-      eventType: "member_invite_decline",
-      resourceType: "recycling_group",
-      resourceId: invitation.groupId,
-      payload: { invitationId },
-    });
-    await appendGroupHistory(invitation.groupId, "member_invite_declined", {
-      invitationId,
-      recipientUid: uid,
-    });
+      void recordAuditEvent({
+        eventType: "member_invite_decline",
+        resourceType: "recycling_group",
+        resourceId: invitation.groupId,
+        payload: { invitationId },
+      });
+      await appendGroupHistory(invitation.groupId, "member_invite_declined", {
+        invitationId,
+        recipientUid: uid,
+      });
+    } catch (err) {
+      console.error("[declineGroupInvitation] failed to decline invitation", { invitationId, err });
+      throw createInvitationError("decline-failed", "Não foi possível recusar o convite no momento. Tente novamente.");
+    }
   };
 
   useEffect(() => {

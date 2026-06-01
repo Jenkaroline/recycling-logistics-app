@@ -2,18 +2,45 @@ import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { openCameraForRecycling } from "./cameraCapture";
 
-export async function captureRecyclingEvidencePhoto(): Promise<string | null> {
-  const asset = await openCameraForRecycling();
-  if (!asset?.base64) {
-    Alert.alert("Erro", "Não foi possível salvar a foto da evidência.");
-    return null;
+function logEvidenceError(scope: string, step: string, error?: unknown) {
+  if (error instanceof Error) {
+    console.error(`[Evidence][${scope}] ${step}`, { message: error.message, stack: error.stack });
+    return;
   }
 
+  if (error !== undefined) {
+    console.error(`[Evidence][${scope}] ${step}`, error);
+    return;
+  }
+
+  console.error(`[Evidence][${scope}] ${step}`);
+}
+
+export async function captureRecyclingEvidencePhoto(scope = "evidência"): Promise<string | null> {
   try {
+    const asset = await openCameraForRecycling();
+    if (!asset) {
+      logEvidenceError(scope, "camera_cancelled");
+      return null;
+    }
+
+    if (!asset.base64) {
+      logEvidenceError(scope, "camera_missing_base64", { uri: asset.uri, mimeType: asset.mimeType });
+      Alert.alert(
+        "Falha na câmera",
+        `A câmera abriu, mas não gerou uma imagem válida para registrar ${scope}. Tente novamente.`,
+      );
+      return null;
+    }
+
     const contentType = asset.mimeType || "image/jpeg";
     return `data:${contentType};base64,${asset.base64}`;
-  } catch {
-    Alert.alert("Erro", "Não foi possível salvar a foto da evidência.");
+  } catch (error) {
+    logEvidenceError(scope, "camera_exception", error);
+    Alert.alert(
+      "Falha na câmera",
+      `Não foi possível capturar a foto para ${scope}. Verifique a permissão da câmera e tente novamente.`,
+    );
     return null;
   }
 }
@@ -24,7 +51,7 @@ export type RecyclingEvidenceLocation = {
   locationLabel: string;
 };
 
-export async function captureRecyclingEvidenceLocation(): Promise<RecyclingEvidenceLocation | null> {
+export async function captureRecyclingEvidenceLocation(scope = "evidência"): Promise<RecyclingEvidenceLocation | null> {
   try {
     let permission = await Location.getForegroundPermissionsAsync();
     if (!permission.granted) {
@@ -32,9 +59,10 @@ export async function captureRecyclingEvidenceLocation(): Promise<RecyclingEvide
     }
 
     if (!permission.granted) {
+      logEvidenceError(scope, "location_permission_denied");
       Alert.alert(
         "Permissão de localização",
-        "Precisamos da sua localização para registrar o descarte em ecoponto.",
+        `Precisamos da sua localização para registrar ${scope}. Ative a permissão e tente novamente.`,
       );
       return null;
     }
@@ -66,8 +94,12 @@ export async function captureRecyclingEvidenceLocation(): Promise<RecyclingEvide
     }
 
     return { latitude, longitude, locationLabel };
-  } catch {
-    Alert.alert("Erro", "Não foi possível obter sua localização atual.");
+  } catch (error) {
+    logEvidenceError(scope, "location_exception", error);
+    Alert.alert(
+      "Falha de localização",
+      `Não foi possível obter sua localização para ${scope}. Tente novamente em um local com sinal melhor.`,
+    );
     return null;
   }
 }

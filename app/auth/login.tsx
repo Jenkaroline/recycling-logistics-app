@@ -1,6 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { Image } from "expo-image";
+import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import React, { useState } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -23,6 +24,7 @@ type RootStackParamList = {
 
 export default function LoginScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const router = useRouter();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const { top: insetTop } = useSafeAreaInsets();
@@ -81,14 +83,12 @@ export default function LoginScreen() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (userCredential.user && !userCredential.user.emailVerified) {
-        navigation.navigate("VerifyEmail", {
-          message: "Sua conta ainda não foi verificada. Confira seu e-mail para liberar o acesso.",
-          email: userCredential.user.email || sanitize(email),
-          flow: "register",
-        });
+        const msg = encodeURIComponent("Sua conta ainda não foi verificada. Confira seu e-mail para liberar o acesso.");
+        const emailParam = encodeURIComponent(userCredential.user.email || sanitize(email));
+        router.push(`/auth/verifyEmail?message=${msg}&email=${emailParam}&flow=register`);
         return;
       }
-      navigation.navigate("Main");
+      router.replace("/");
     } catch (err: any) {
       setError(translateFirebaseError(err));
     }
@@ -178,7 +178,7 @@ export default function LoginScreen() {
         </Button>
         <Button
           textColor={palette.link}
-          onPress={() => navigation.navigate("ResetPassword")}
+          onPress={() => router.push("/auth/resetPassword")}
           style={styles.linkButton}
         >
           Esqueci minha senha
@@ -186,7 +186,7 @@ export default function LoginScreen() {
 
         <Button
           textColor={palette.link}
-          onPress={() => navigation.navigate("Register")}
+          onPress={() => router.push("/auth/register")}
           style={styles.linkButton}
         >
           Criar conta

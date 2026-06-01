@@ -31,15 +31,24 @@ export type PlasticEntry = {
   editCount?: number;
 };
 
+export type PlasticDayConfirmation = {
+  dayKey: string;
+  status: "zero";
+  updatedAt?: string;
+};
+
 type PlasticConsumptionContextValue = {
   entries: PlasticEntry[];
   totalGrams: number;
+  zeroConsumptionDays: Record<string, true>;
   addEntry: (
     amountGrams: number,
     category?: { name: string; icon?: string },
   ) => Promise<void>;
   goalGrams: number | null;
   setGoal: (g: number | null) => Promise<void>;
+  confirmZeroConsumption: (dayKey: string) => Promise<void>;
+  clearZeroConsumptionConfirmation: (dayKey: string) => Promise<void>;
   updateEntry: (
     id: string,
     payload: { amountGrams: number; categoryName?: string },
@@ -74,11 +83,13 @@ export function PlasticConsumptionProvider({
   const MAX_EDIT_COUNT = 3;
   const [entries, setEntries] = useState<PlasticEntry[]>([]);
   const [goalGrams, setGoalGrams] = useState<number | null>(null);
+  const [zeroConsumptionDays, setZeroConsumptionDays] = useState<Record<string, true>>({});
   const currentUidRef = useRef<string | null>(auth.currentUser?.uid || null);
 
   useEffect(() => {
     let unsubscribeEntries: (() => void) | null = null;
     let unsubscribeGoal: (() => void) | null = null;
+    let unsubscribeZeroConsumptionDays: (() => void) | null = null;
 
     const bindForUid = (uid: string | null) => {
       if (unsubscribeEntries) {
@@ -89,10 +100,15 @@ export function PlasticConsumptionProvider({
         unsubscribeGoal();
         unsubscribeGoal = null;
       }
+      if (unsubscribeZeroConsumptionDays) {
+        unsubscribeZeroConsumptionDays();
+        unsubscribeZeroConsumptionDays = null;
+      }
 
       if (!uid) {
         setEntries([]);
         setGoalGrams(null);
+        setZeroConsumptionDays({});
         return;
       }
 
@@ -141,6 +157,28 @@ export function PlasticConsumptionProvider({
           console.warn("Plastic goal listener failed:", error);
         },
       );
+
+      const zeroDaysQuery = query(collection(db, "users", uid, "plasticConsumptionZeroDays"), orderBy("dayKey", "desc"));
+      unsubscribeZeroConsumptionDays = onSnapshot(
+        zeroDaysQuery,
+        (snapshot) => {
+          const nextDays: Record<string, true> = {};
+          snapshot.docs.forEach((snap) => {
+            const data = snap.data() as Partial<PlasticDayConfirmation>;
+            if (data.status === "zero") {
+              nextDays[data.dayKey || snap.id] = true;
+            }
+          });
+          setZeroConsumptionDays(nextDays);
+        },
+        (error) => {
+          if (error.code === "permission-denied") {
+            setZeroConsumptionDays({});
+            return;
+          }
+          console.warn("Plastic zero-consumption listener failed:", error);
+        },
+      );
     };
 
     bindForUid(auth.currentUser?.uid || null);
@@ -153,6 +191,7 @@ export function PlasticConsumptionProvider({
       unsub();
       if (unsubscribeEntries) unsubscribeEntries();
       if (unsubscribeGoal) unsubscribeGoal();
+      if (unsubscribeZeroConsumptionDays) unsubscribeZeroConsumptionDays();
     };
   }, []);
 
@@ -179,6 +218,40 @@ export function PlasticConsumptionProvider({
       resourceType: "plastic_consumption",
       resourceId: uid || null,
       payload: { goalGrams: g },
+    });
+  };
+
+  const confirmZeroConsumption = async (dayKey: string) => {
+    const uid = currentUidRef.current;
+    if (!uid || !dayKey) return;
+
+    await setDoc(
+      doc(db, "users", uid, "plasticConsumptionZeroDays", dayKey),
+      {
+        dayKey,
+        status: "zero",
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    void recordAuditEvent({
+      eventType: "create",
+      resourceType: "plastic_consumption",
+      resourceId: dayKey,
+      payload: { status: "zero" },
+    });
+  };
+
+  const clearZeroConsumptionConfirmation = async (dayKey: string) => {
+    const uid = currentUidRef.current;
+    if (!uid || !dayKey) return;
+
+    await deleteDoc(doc(db, "users", uid, "plasticConsumptionZeroDays", dayKey));
+    void recordAuditEvent({
+      eventType: "delete",
+      resourceType: "plastic_consumption",
+      resourceId: dayKey,
+      payload: { status: "zero" },
     });
   };
 
@@ -268,7 +341,18 @@ export function PlasticConsumptionProvider({
 
   return (
     <PlasticConsumptionContext.Provider
-      value={{ entries, totalGrams, goalGrams, setGoal: persistGoal, addEntry, updateEntry, deleteEntry }}
+      value={{
+        entries,
+        totalGrams,
+        zeroConsumptionDays,
+        goalGrams,
+        setGoal: persistGoal,
+        confirmZeroConsumption,
+        clearZeroConsumptionConfirmation,
+        addEntry,
+        updateEntry,
+        deleteEntry,
+      }}
     >
       {children}
     </PlasticConsumptionContext.Provider>

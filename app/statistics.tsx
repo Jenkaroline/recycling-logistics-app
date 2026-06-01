@@ -41,6 +41,13 @@ function dayKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function parseDayKey(value: string) {
+  const [year, month, day] = value.split("-").map((part) => Number(part));
+  const date = new Date(year, month - 1, day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -94,7 +101,11 @@ export default function StatisticsScreen() {
   const drawerStatus = useDrawerStatus();
   const drawerOpen = drawerStatus === "open";
   const drawerNavigation = navigation.getParent?.("MainDrawer") || navigation;
-  const { entries, goalGrams } = usePlasticConsumption();
+  const {
+    entries,
+    goalGrams,
+    zeroConsumptionDays,
+  } = usePlasticConsumption();
   const { darkModeEnabled } = useThemePreference();
   const { width } = useWindowDimensions();
   const [statsRange, setStatsRange] = useState<DashboardRange>("month");
@@ -153,6 +164,7 @@ export default function StatisticsScreen() {
     const goalPerDay = goalGrams ?? 50;
     const today = new Date();
     today.setHours(23, 59, 59, 999);
+    const todayKey = dayKey(today);
 
     const currentStart = new Date(today);
     currentStart.setHours(0, 0, 0, 0);
@@ -172,6 +184,10 @@ export default function StatisticsScreen() {
     const previousStart = new Date(currentStart);
     previousStart.setDate(previousStart.getDate() - rangeDays);
 
+    const zeroConfirmedDayKeys = new Set(
+      Object.keys(zeroConsumptionDays).filter((key) => zeroConsumptionDays[key]),
+    );
+
     const normalized = [...entries]
       .map((entry) => {
         const rawGrams = (entry as any).amountGrams ?? (entry as any).grams ?? 0;
@@ -189,44 +205,58 @@ export default function StatisticsScreen() {
       .filter((x): x is { grams: number; date: Date; categoryName?: string; categoryIcon?: string } => x !== null)
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
+    const currentEntries = normalized.filter((item) => item.date >= currentStart && item.date <= today);
+    const previousEntries = normalized.filter((item) => item.date >= previousStart && item.date < currentStart);
+
     const dailyMap = new Map<string, number>();
     let currentTotal = 0;
     let previousTotal = 0;
 
-    normalized.forEach((item) => {
-      if (item.date < previousStart || item.date > today) return;
+    currentEntries.forEach((item) => {
       const key = dayKey(item.date);
       dailyMap.set(key, (dailyMap.get(key) ?? 0) + item.grams);
-      if (item.date >= currentStart) currentTotal += item.grams;
-      else previousTotal += item.grams;
+      currentTotal += item.grams;
     });
 
-    const currentAverage = currentTotal / rangeDays;
-    const previousAverage = previousTotal / rangeDays;
-    const growthPercent =
-      previousAverage > 0
-        ? ((currentAverage - previousAverage) / previousAverage) * 100
-        : 0;
+    previousEntries.forEach((item) => {
+      previousTotal += item.grams;
+    });
+
+    const currentRecordedDayKeys = new Set<string>(dailyMap.keys());
+    const previousRecordedDayKeys = new Set<string>(previousEntries.map((item) => dayKey(item.date)));
+
+    zeroConfirmedDayKeys.forEach((key) => {
+      const keyDate = parseDayKey(key);
+      if (keyDate >= currentStart && keyDate <= today) {
+        currentRecordedDayKeys.add(key);
+      }
+      if (keyDate >= previousStart && keyDate < currentStart) {
+        previousRecordedDayKeys.add(key);
+      }
+    });
+
+    const currentRecordedDays = currentRecordedDayKeys.size;
+    const previousRecordedDays = previousRecordedDayKeys.size;
+    const hasCurrentRecords = currentRecordedDays > 0;
+    const hasPreviousRecords = previousRecordedDays > 0;
+
+    const currentAverage = hasCurrentRecords ? currentTotal / currentRecordedDays : 0;
+    const previousAverage = hasPreviousRecords ? previousTotal / previousRecordedDays : 0;
+    const growthPercent = hasCurrentRecords && hasPreviousRecords && previousAverage > 0
+      ? ((currentAverage - previousAverage) / previousAverage) * 100
+      : null;
 
     let daysWithinGoal = 0;
-    for (let i = 0; i < rangeDays; i += 1) {
-      const date = new Date(currentStart);
-      date.setDate(currentStart.getDate() + i);
-      const grams = dailyMap.get(dayKey(date)) ?? 0;
+    for (const key of currentRecordedDayKeys.values()) {
+      const grams = dailyMap.get(key) ?? 0;
       if (grams <= goalPerDay) daysWithinGoal += 1;
     }
-    const daysOutsideGoal = rangeDays - daysWithinGoal;
-    const topPercent = Math.max(
-      5,
-      Math.min(
-        99,
-        Math.round(
-          100 -
-            (currentAverage / Math.max(goalPerDay, 1)) * 42 -
-            (daysWithinGoal / Math.max(rangeDays, 1)) * 28,
-        ),
-      ),
-    );
+    const daysOutsideGoal = currentRecordedDays - daysWithinGoal;
+    const daysWithoutRecords = rangeDays - currentRecordedDays;
+    const coveragePercent = Math.round((currentRecordedDays / Math.max(rangeDays, 1)) * 100);
+    const goalHitRatePercent = hasCurrentRecords
+      ? Math.round((daysWithinGoal / Math.max(currentRecordedDays, 1)) * 100)
+      : null;
 
     const buildCategories = (start: Date, end: Date) => {
       const grouped = new Map<
@@ -242,8 +272,7 @@ export default function StatisticsScreen() {
           icon: item.categoryIcon,
         };
         current.value += item.grams;
-        if (!current.icon && item.categoryIcon)
-          current.icon = item.categoryIcon;
+        if (!current.icon && item.categoryIcon) current.icon = item.categoryIcon;
         grouped.set(label, current);
       });
       return [...grouped.values()].sort((a, b) => b.value - a.value);
@@ -362,13 +391,20 @@ export default function StatisticsScreen() {
     return {
       rangeDays,
       goalPerDay,
+      todayKey,
       currentTotal,
+      currentRecordedDays,
+      previousRecordedDays,
+      hasCurrentRecords,
+      hasPreviousRecords,
       currentAverage,
       previousAverage,
       growthPercent,
       daysWithinGoal,
       daysOutsideGoal,
-      topPercent,
+      daysWithoutRecords,
+      coveragePercent,
+      goalHitRatePercent,
       barSegments,
       barMax,
       pieSize,
@@ -377,7 +413,7 @@ export default function StatisticsScreen() {
       pieCircumference,
       pieSlices: doughnut,
     };
-  }, [entries, statsRange, goalGrams]);
+  }, [entries, statsRange, goalGrams, zeroConsumptionDays]);
 
   const selectedSegment = selectedBarKey
     ? (dashboard.barSegments.find(
@@ -417,16 +453,23 @@ export default function StatisticsScreen() {
     1,
     dashboard.goalPerDay > 0 ? dashboard.currentAverage / dashboard.goalPerDay : 0,
   );
-
-  const heroFeedback =
-    dashboard.currentAverage <= dashboard.goalPerDay
-      ? `Você está ${Math.max(0, Math.round(dashboard.goalPerDay - dashboard.currentAverage))}g abaixo da meta diária.`
-      : `Você está ${Math.max(0, Math.round(dashboard.currentAverage - dashboard.goalPerDay))}g acima da meta diária.`;
-
-  const heroFeedbackTone =
-    dashboard.currentAverage <= dashboard.goalPerDay
-      ? palette.accent
-      : palette.danger;
+  let heroFeedback: string;
+  let heroFeedbackTone = palette.accent;
+  if (dashboard.growthPercent !== null) {
+    if (dashboard.growthPercent < 0) {
+      heroFeedback = `Ótimo — ${Math.abs(dashboard.growthPercent).toFixed(0)}% de redução comparado ao período anterior. Continue assim!`;
+      heroFeedbackTone = palette.accent;
+    } else if (dashboard.growthPercent > 0) {
+      heroFeedback = `${dashboard.growthPercent.toFixed(0)}% acima do período anterior — foque em reduzir as porções diárias.`;
+      heroFeedbackTone = palette.danger;
+    } else {
+      heroFeedback = `Ritmo estável em relação ao período anterior. Quanto menos melhor — continue a reduzir.`;
+      heroFeedbackTone = palette.accent;
+    }
+  } else {
+    heroFeedback = `Reduza o plástico, preserve o planeta. Registros e confirmações ajudam a acompanhar seu progresso.`;
+    heroFeedbackTone = palette.accent;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
@@ -493,7 +536,7 @@ export default function StatisticsScreen() {
             <Text style={{ color: palette.textPrimary, fontSize: 28, lineHeight: 38, fontWeight: "900", letterSpacing: -0.6 }}>
               Seu consumo em destaque
             </Text>
-            <Text style={{ color: palette.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
+            <Text style={{ color: heroFeedbackTone, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
               {heroFeedback}
             </Text>
 
@@ -502,9 +545,10 @@ export default function StatisticsScreen() {
                 <View style={{ width: `${Math.round(heroProgress * 100)}%`, height: "100%", backgroundColor: heroProgress <= 1 ? palette.accent : palette.danger }} />
               </View>
               <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 8 }}>
-                Meta: {dashboard.goalPerDay}g 
+                {`Limite diário: ${dashboard.goalPerDay}g `}
               </Text>
             </View>
+
             
           </View>
 
@@ -522,16 +566,13 @@ export default function StatisticsScreen() {
         ]}
       >
         <Text style={[styles.label, { color: palette.textSecondary }]}>
-          Consumo do período
+          Cobertura do período
         </Text>
         <Text style={[styles.value, { color: palette.textPrimary }]}>
-          {dashboard.currentAverage.toFixed(0)}g
+          {dashboard.coveragePercent}%
         </Text>
         <Text style={{ color: palette.accent, marginTop: 6, fontSize: 11 }}>
-          {dashboard.growthPercent >= 0
-            ? `↑ ${dashboard.growthPercent.toFixed(0)}%`
-            : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}%`}{" "}
-          vs período anterior
+          {dashboard.currentRecordedDays} dias com registro de {dashboard.rangeDays}
         </Text>
       </View>
 
@@ -587,10 +628,13 @@ export default function StatisticsScreen() {
       >
         {[
           {
-            label: "Média diária",
-            value: `${dashboard.currentAverage.toFixed(0)}g`,
-            note:
-              dashboard.growthPercent >= 0
+            label: "Média por dia registrado",
+            value: dashboard.hasCurrentRecords ? `${dashboard.currentAverage.toFixed(0)}g` : "—",
+            note: dashboard.growthPercent === null
+              ? dashboard.hasCurrentRecords
+                ? "sem comparação anterior"
+                : "aguardando registros reais"
+              : dashboard.growthPercent >= 0
                 ? `↑ ${dashboard.growthPercent.toFixed(0)}%`
                 : `↓ ${Math.abs(dashboard.growthPercent).toFixed(0)}%`,
           },
@@ -600,14 +644,16 @@ export default function StatisticsScreen() {
             note: "período selecionado",
           },
           {
-            label: "Meta atingida",
-            value: `${dashboard.daysWithinGoal}/${dashboard.rangeDays}`,
-            note: "dias no alvo",
+            label: "Dias com registro",
+            value: `${dashboard.currentRecordedDays}/${dashboard.rangeDays}`,
+            note: `${dashboard.coveragePercent}% do período`,
           },
           {
-            label: "Ranking",
-            value: `Top ${dashboard.topPercent}%`,
-            note: "neste recorte",
+            label: "Dias na meta",
+            value: dashboard.hasCurrentRecords ? `${dashboard.daysWithinGoal}/${dashboard.currentRecordedDays}` : "—",
+            note: dashboard.hasCurrentRecords
+              ? `${dashboard.goalHitRatePercent}% dos dias confirmados`
+              : "sem dados confirmados",
           },
         ].map((card) => (
           <View
