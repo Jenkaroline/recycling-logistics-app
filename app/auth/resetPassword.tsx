@@ -5,8 +5,10 @@ import { Button, TextInput } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { useRouter } from "expo-router";
-import { fetchSignInMethodsForEmail, sendPasswordResetEmail } from "firebase/auth";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../../service/firebaseConfig";
+import { getFirestore, collection, query, where, getDocs } from "firebase/firestore";
+const db = getFirestore();
 import { translateFirebaseError } from "../../src/firebaseErrorMapper";
 import { useThemePreference } from "../../src/ThemePreferenceContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -71,71 +73,50 @@ export default function ResetPasswordScreen() {
     setError("");
     setStatusMessage("");
     const normalizedEmail = email.trim().toLowerCase();
-    console.info("[ResetPassword] handleSendReset start", { normalizedEmail });
 
     if (!normalizedEmail) {
       setError("E-mail é obrigatório!");
-      console.warn("[ResetPassword] blocked: empty email");
       return;
     }
     if (!isValidEmail(normalizedEmail)) {
       setError("Digite um e-mail válido para recuperar a senha.");
-      console.warn("[ResetPassword] blocked: invalid email format", { normalizedEmail });
       return;
     }
+
     setIsSending(true);
     try {
-      console.info("[ResetPassword] validating account existence", {
-        inputEmail: normalizedEmail,
-      });
+      // Verifica se o email existe na coleção users
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("emailLower", "==", normalizedEmail));
+      const snapshot = await getDocs(q);
 
-      const signInMethods = await fetchSignInMethodsForEmail(auth, normalizedEmail);
-      console.info("[ResetPassword] validation result", {
-        inputEmail: normalizedEmail,
-        methodsCount: signInMethods.length,
-      });
-
-      if (signInMethods.length === 0) {
-        console.warn("[ResetPassword] account not registered in app", {
-          inputEmail: normalizedEmail,
-        });
+      if (snapshot.empty) {
         setError("Não encontramos uma conta cadastrada com esse e-mail no app. Confira o endereço ou crie uma conta.");
         return;
       }
 
-      console.info("[ResetPassword] sending password reset", {
-        inputEmail: normalizedEmail,
-      });
-
       const redirectUrl = "https://jenkaroline.github.io/recycling-logistics-app/action/";
-      const actionCodeSettings = {
-        // Use an HTTPS redirect page (GitHub Pages) that forwards the oobCode to the app scheme.
+      await sendPasswordResetEmail(auth, normalizedEmail, {
         url: redirectUrl,
         handleCodeInApp: true,
-      } as any;
-      await sendPasswordResetEmail(auth, normalizedEmail, actionCodeSettings);
-      console.info("[ResetPassword] reset email sent", {
-        inputEmail: normalizedEmail,
-      });
+      } as any);
+
       setStatusMessage("E-mail de redefinição enviado. Verifique sua caixa de entrada.");
     } catch (err: any) {
       const code = err?.code?.toString?.() || "";
-      console.warn("[ResetPassword] send reset failed", {
-        inputEmail: normalizedEmail,
-        code,
-        message: err?.message || String(err),
-      });
+
+      console.log("ERRO COMPLETO:", JSON.stringify(err));
+      console.log("CODE:", code);
+      console.log("MESSAGE:", err?.message);
+
       if (code === "auth/invalid-email") {
         setError("Digite um e-mail válido para recuperar a senha.");
-      } else if (code === "auth/user-not-found") {
-        setError("Não encontramos uma conta cadastrada com esse e-mail no app. Confira o endereço ou crie uma conta.");
       } else if (code === "auth/too-many-requests") {
         setError("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
       } else if (code === "auth/network-request-failed") {
         setError("Falha de conexão. Verifique sua internet e tente novamente.");
       } else {
-        const mapped = translateFirebaseError(err);
-        setError(mapped === "Não foi possível concluir a ação. Tente novamente mais tarde." ? "Não foi possível enviar o e-mail de redefinição agora. Tente novamente em instantes." : mapped);
+        setError("Não foi possível enviar o e-mail de redefinição agora. Tente novamente em instantes.");
       }
       setStatusMessage("");
     } finally {
