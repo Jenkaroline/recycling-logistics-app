@@ -12,6 +12,7 @@ import {
   orderBy,
   query,
   writeBatch,
+  arrayUnion,
   serverTimestamp,
   Timestamp,
   setDoc,
@@ -186,7 +187,7 @@ function normalizeGroup(group: CompetitionGroup & { createdAt?: unknown }): Comp
         ...explicitMemberIds,
         ...normalizedMembers.map((member) => member.id),
         group.ownerId,
-      ].filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim()),
+      ].filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim().length > 0),
     ),
   );
 
@@ -202,7 +203,7 @@ function normalizeGroup(group: CompetitionGroup & { createdAt?: unknown }): Comp
     totalXp: Number(group.totalXp || 0),
     totalActions: Number(group.totalActions || 0),
     removedMemberIds: Array.isArray(group.removedMemberIds)
-      ? Array.from(new Set(group.removedMemberIds.filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim())))
+      ? Array.from(new Set(group.removedMemberIds.filter((memberId): memberId is string => typeof memberId === "string" && memberId.trim().length > 0)))
       : [],
     members: normalizedMembers,
     memberIds,
@@ -225,7 +226,7 @@ function getGroupMemberIds(input: Partial<CompetitionGroup> | CompetitionGroup, 
   return Array.from(
     new Set(
       [...fromMembers, ...fromExplicit, ...fromFallback, ownerId].filter(
-        (memberId): memberId is string => typeof memberId === "string" && memberId.trim(),
+        (memberId): memberId is string => typeof memberId === "string" && memberId.trim().length > 0,
       ),
     ),
   );
@@ -859,6 +860,17 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
 
     const acceptedInvitationGroups = receivedInvitations
       .filter((invitation) => invitation.status === "accepted")
+      .filter((invitation) => {
+        const groupExists = merged.has(invitation.groupId);
+        if (groupExists) return true;
+
+        const endsAt = invitation.groupChallengeEndsAt
+          ? Date.parse(invitation.groupChallengeEndsAt)
+          : NaN;
+        const isExpired = Number.isFinite(endsAt) && Date.now() >= endsAt;
+
+        return !isExpired;
+      })
       .map((invitation) => buildAcceptedInvitationGroup(invitation));
 
     acceptedInvitationGroups.forEach((group) => {
@@ -877,6 +889,47 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
 
     return [...merged.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [groups, groupInvitations, sharedGroupTotals, users]);
+
+  // watch for groups that reached their configured end and finalize them once
+  useEffect(() => {
+    console.log("[finalize-effect] checking", groupsForDisplay.length, "groups");
+    for (const group of groupsForDisplay) {
+      console.log("[finalize-effect]", {
+        groupName: group.name,
+        groupId: group.id,
+        isActive: group.isActive,
+        challengeEndsAt: group.challengeEndsAt,
+        type: typeof group.challengeEndsAt,
+      });
+      if (!group.isActive) {
+        console.log("[finalize-effect] skip - not active");
+        continue;
+      }
+      if (!group.challengeEndsAt) {
+        console.log("[finalize-effect] skip - no challengeEndsAt");
+        continue;
+      }
+      const endedAt = Date.parse(group.challengeEndsAt);
+      const now = Date.now();
+      const isExpired = now >= endedAt;
+      console.log("[finalize-effect] time check:", {
+        endedAt,
+        now,
+        isExpired,
+        isFinite: Number.isFinite(endedAt),
+      });
+      if (!Number.isFinite(endedAt)) {
+        console.log("[finalize-effect] skip - invalid date parse");
+        continue;
+      }
+      if (isExpired) {
+        console.log("[finalize-effect] TRIGGER FINALIZE for", group.name);
+        void finalizeGroupIfNeeded(group);
+      } else {
+        console.log("[finalize-effect] skip - not yet expired");
+      }
+    }
+  }, [groupsForDisplay]);
 
   const appendGroupHistory = async (
     groupId: string,
@@ -953,6 +1006,166 @@ export function RecyclingCompetitionProvider({ children }: { children: React.Rea
         await setDoc(doc(db, "users", invitation.recipientUid, "groupInvitationsReceived", invitation.id), metadataPatch, { merge: true });
       }),
     );
+  };
+
+  // finalize group when its configured period ends: persist podium, award medals to top-3 and delete the group
+  const finalizeGroupIfNeeded = async (group: CompetitionGroup) => {
+    try {
+      console.log("[finalizeGroupIfNeeded] starting for", group.name, group.id);
+      if (!group.isActive) {
+        console.log("[finalizeGroupIfNeeded] group not active");
+        return;
+      }
+      if (!group.challengeEndsAt) {
+        console.log("[finalizeGroupIfNeeded] no challengeEndsAt");
+        return;
+      }
+      const endedAt = Date.parse(group.challengeEndsAt || "");
+      console.log("[finalizeGroupIfNeeded] endedAt:", endedAt, "now:", Date.now(), "isExpired:", Date.now() >= endedAt);
+      if (!Number.isFinite(endedAt) || Date.now() < endedAt) {
+        console.log("[finalizeGroupIfNeeded] not yet expired");
+        return;
+      }
+
+      const finalRef = doc(db, "groups", group.id, "podium", "final");
+      const finalSnap = await getDoc(finalRef);
+      if (finalSnap.exists()) {
+        console.log("[finalizeGroupIfNeeded] already finalized");
+        return;
+      }
+
+      console.log("[finalizeGroupIfNeeded] finalizing group", group.name);
+      console.log("[finalizeGroupIfNeeded] members count:", group.members?.length || 0);
+      const sorted = [...(group.members || [])].sort((a, b) => {
+        if (b.totalXp !== a.totalXp) return b.totalXp - a.totalXp;
+        if (b.actionsCount !== a.actionsCount) return b.actionsCount - a.actionsCount;
+        return a.name.localeCompare(b.name, "pt-BR");
+      });
+
+      const nonZeroMembers = sorted.filter((member) => member.totalXp > 0 || member.actionsCount > 0);
+      let currentPosition = 1;
+      let previousXp: number | null = null;
+      const podium = [] as Array<{
+        position: number;
+        memberId: string;
+        name: string;
+        totalXp: number;
+        actionsCount: number;
+      }>;
+
+      for (const member of nonZeroMembers) {
+        if (previousXp !== null && member.totalXp !== previousXp) {
+          currentPosition += 1;
+        }
+        if (currentPosition > 3) break;
+
+        podium.push({
+          position: currentPosition,
+          memberId: member.id,
+          name: member.name,
+          totalXp: member.totalXp,
+          actionsCount: member.actionsCount,
+        });
+
+        previousXp = member.totalXp;
+      }
+
+      console.log("[finalizeGroupIfNeeded] podium created:", podium.length, "members");
+      console.log("[finalizeGroupIfNeeded] saving podium to firestore...");
+      await setDoc(finalRef, {
+        groupId: group.id,
+        groupName: group.name,
+        podium,
+        finalizedAt: serverTimestamp(),
+        endedAt: group.challengeEndsAt,
+      });
+      console.log("[finalizeGroupIfNeeded] podium saved!");
+
+      // delete the group after finalization so only podium data remains
+      console.log("[finalizeGroupIfNeeded] deleting group...");
+      await deleteGroup(group.id);
+      console.log("[finalizeGroupIfNeeded] group deleted!");
+      await appendGroupHistory(group.id, "group_finalized", { podium });
+      console.log("[finalizeGroupIfNeeded] history appended!");
+
+      if (podium.length === 0) {
+        console.log("[finalizeGroupIfNeeded] no podium entries, sending finalization notifications without medals");
+        for (const member of group.members || []) {
+          try {
+            await addDoc(collection(db, "users", member.id, "competitionNotifications"), {
+              recipientUid: member.id,
+              actorId: auth.currentUser?.uid,
+              type: "group-podium",
+              groupId: group.id,
+              groupName: group.name,
+              title: `Grupo finalizado: ${group.name}`,
+              description: `O grupo ${group.name} foi finalizado sem registros válidos. Ninguém recebeu medalhas.`,
+              createdAt: serverTimestamp(),
+            });
+            console.log("[finalizeGroupIfNeeded] no-medal notification created for", member.name);
+          } catch (err) {
+            console.warn("Failed to create no-medal notification for", member.id, err);
+          }
+        }
+      } else {
+        console.log("[finalizeGroupIfNeeded] awarding medals to", podium.length, "members...");
+        for (const p of podium) {
+          console.log("[finalizeGroupIfNeeded] awarding medal to", p.name, "position", p.position);
+          try {
+            await addDoc(collection(db, "users", p.memberId, "medals"), {
+              groupId: group.id,
+              groupName: group.name,
+              position: p.position,
+              awardedAt: serverTimestamp(),
+              endedAt: group.challengeEndsAt,
+              recipientUid: p.memberId,
+              awardedByUid: auth.currentUser?.uid || null,
+            });
+            console.log("[finalizeGroupIfNeeded] medal stored for", p.name);
+            try {
+              await addDoc(collection(db, "users", p.memberId, "competitionNotifications"), {
+                recipientUid: p.memberId,
+                actorId: auth.currentUser?.uid,
+                type: "group-podium",
+                groupId: group.id,
+                groupName: group.name,
+                position: p.position,
+                title: `Pódio: ${group.name}`,
+                description: `Parabéns ${p.name}! Você conquistou a posição ${p.position} no grupo ${group.name}.`,
+                createdAt: serverTimestamp(),
+              });
+              console.log("[finalizeGroupIfNeeded] notification created for", p.name);
+            } catch (err) {
+              console.warn("Failed to create podium notification for", p.memberId, err);
+            }
+          } catch (err) {
+            console.warn("Failed to award medal to", p.memberId, err);
+          }
+        }
+        console.log("[finalizeGroupIfNeeded] all medals awarded!");
+      }
+
+      console.log("[finalizeGroupIfNeeded] recording audit event...");
+      void recordAuditEvent({
+        eventType: "delete",
+        resourceType: "recycling_group",
+        resourceId: group.id,
+        payload: { podium },
+      });
+
+      console.log("[finalizeGroupIfNeeded] SUCCESS - group finalized:", group.id);
+    } catch (error) {
+      const isOffline = (error as { code?: string })?.code === "failed-precondition" || 
+                       (String(error).includes("offline") || String(error).includes("client is offline"));
+      
+      if (isOffline) {
+        console.warn("[finalizeGroupIfNeeded] OFFLINE - will retry on next sync:", error);
+        // Retry after 3 seconds when offline
+        setTimeout(() => void finalizeGroupIfNeeded(group), 3000);
+      } else {
+        console.warn("[finalizeGroupIfNeeded] ERROR:", error);
+      }
+    }
   };
 
   const createGroup = async (input: {

@@ -11,10 +11,12 @@ import { usePlasticConsumption } from "../src/PlasticConsumptionContext";
 import { Image } from "react-native";
 
 import MapsScreen from "./maps";
+import PodiumScreen from "../src/PodiumScreen.tsx";
+import MedalsModal from "../src/MedalsModal.tsx";
 import { Ionicons } from "@expo/vector-icons";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { signOut } from "firebase/auth";
-import React from "react";
+import React, { useState } from "react";
 import { Alert, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../service/firebaseConfig";
@@ -80,6 +82,9 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
         dangerBg: "#f3dfe2",
       };
 
+  const [selectedMedalUserId, setSelectedMedalUserId] = useState<string | null>(null);
+  const [selectedMedalUserName, setSelectedMedalUserName] = useState<string | null>(null);
+
   const openMainScreen = (screen: string, params?: Record<string, unknown>) => {
     (props.navigation as any).navigate(screen, params);
   };
@@ -105,11 +110,19 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
     >
       <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          {currentProfile?.avatarUrl ? (
-            <Image source={{ uri: currentProfile.avatarUrl }} style={{ width: 56, height: 56, borderRadius: 12 }} />
-          ) : (
-            <Image source={require("../assets/images/logo-ciclo.png")} style={{ width: 56, height: 56, borderRadius: 12 }} />
-          )}
+          <TouchableOpacity
+            onPress={() => {
+              setSelectedMedalUserId(auth.currentUser?.uid || null);
+              setSelectedMedalUserName(currentProfile?.username || "Você");
+            }}
+            style={{ borderRadius: 12, overflow: "hidden" }}
+          >
+            {currentProfile?.avatarUrl ? (
+              <Image source={{ uri: currentProfile.avatarUrl }} style={{ width: 56, height: 56, borderRadius: 12 }} />
+            ) : (
+              <Image source={require("../assets/images/logo-ciclo.png")} style={{ width: 56, height: 56, borderRadius: 12 }} />
+            )}
+          </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={{ color: palette.textPrimary, fontSize: 16, fontWeight: "800" }}>{currentProfile?.username || "Você"}</Text>
             <Text style={{ color: palette.textMuted, fontSize: 12 }}>{todayCount} registros hoje</Text>
@@ -207,6 +220,15 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
           }}
         />
       </View>
+      <MedalsModal
+        visible={Boolean(selectedMedalUserId)}
+        userId={selectedMedalUserId || auth.currentUser?.uid || ""}
+        userLabel={selectedMedalUserName || currentProfile?.username || "Você"}
+        onClose={() => {
+          setSelectedMedalUserId(null);
+          setSelectedMedalUserName(null);
+        }}
+      />
     </DrawerContentScrollView>
   );
 }
@@ -354,6 +376,7 @@ function AppGate() {
   return (
     <Stack.Navigator key="main" screenOptions={{ headerShown: false }} initialRouteName="Main">
       <Stack.Screen name="Main" component={AppDrawer} options={{ headerShown: false }} />
+      <Stack.Screen name="Podio" component={PodiumScreen} options={{ headerShown: false }} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />

@@ -75,8 +75,18 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.resource.data.recipientUid == userId
           && request.resource.data.actorId == request.auth.uid
-          && request.resource.data.type in ["member-removed", "group-invitation"];
+          && request.resource.data.type in ["member-removed", "group-invitation", "group-podium"];
         allow update, delete: if isOwner(userId);
+      }
+
+      match /medals/{medalId} {
+        allow read: if isOwner(userId);
+        allow create: if signedIn()
+          && request.resource.data.recipientUid == userId
+          && request.resource.data.awardedByUid == request.auth.uid
+          && request.resource.data.position is int
+          && request.resource.data.groupId is string;
+        allow update, delete: if false;
       }
 
       match /competitionChatMessages/{docId} {
@@ -152,6 +162,12 @@ service cloud.firestore {
       match /history/{historyId} {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.actorId == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /podium/{podiumId} {
+        allow read: if signedIn();
+        allow create: if signedIn();
         allow update, delete: if false;
       }
     }

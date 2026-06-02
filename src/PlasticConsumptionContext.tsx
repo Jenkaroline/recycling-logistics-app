@@ -69,8 +69,8 @@ function normalizeEntry(entry: PlasticEntry & { createdAt?: unknown }): PlasticE
     createdAt:
       typeof createdAt === "string"
         ? createdAt
-        : createdAt instanceof Timestamp
-          ? createdAt.toDate().toISOString()
+        : createdAt && typeof createdAt === "object" && "toDate" in createdAt && typeof (createdAt as any).toDate === "function"
+          ? (createdAt as any).toDate().toISOString()
           : new Date().toISOString(),
   };
 }

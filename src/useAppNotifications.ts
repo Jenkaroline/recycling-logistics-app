@@ -4,7 +4,7 @@ import { collection, limit, onSnapshot, orderBy, query } from "firebase/firestor
 import { auth, db } from "../service/firebaseConfig";
 import { useRecyclingCompetition } from "./RecyclingCompetitionContext";
 
-export type AppNotificationKind = "invitation" | "invitation-response" | "chat" | "evidence" | "member-removed";
+export type AppNotificationKind = "invitation" | "invitation-response" | "chat" | "evidence" | "member-removed" | "group-podium";
 
 export type AppNotificationItem = {
   id: string;
@@ -213,7 +213,7 @@ export function useAppNotifications() {
                 status: undefined,
                 timestamp: toTimestamp(data.createdAtClient || data.createdAt || rawCreatedAt),
                 rawCreatedAt,
-              } satisfies AppNotificationItem;
+              } as AppNotificationItem;
             })
             .filter((item): item is AppNotificationItem => item !== null);
 
@@ -255,24 +255,33 @@ export function useAppNotifications() {
             const data = snap.data() as UserNotificationDoc;
             const rawCreatedAt = toIsoString(data.createdAt);
 
-            if (data.type === "member-removed" || data.type === "group-invitation") {
+            if (data.type === "member-removed" || data.type === "group-invitation" || data.type === "group-podium") {
               const isGroupInvite = data.type === "group-invitation";
+              const isPodium = data.type === "group-podium";
               const status = data.status || (isGroupInvite ? "pending" : undefined);
               return {
                 id: `usernotif-${snap.id}`,
                 sourceId: snap.id,
-                kind: isGroupInvite ? (status === "pending" ? "invitation" : "invitation-response") : "member-removed",
+                kind: isGroupInvite ? (status === "pending" ? "invitation" : "invitation-response") : isPodium ? "group-podium" : "member-removed",
                 groupId: data.groupId || "",
                 groupName: data.groupName || "Grupo",
-                title: data.title || data.groupName || "Grupo",
-                description: data.description || (isGroupInvite ? `${data.actorName || "Alguém"} convidou você para um grupo.` : `${data.actorName || "Alguém"} removeu você do grupo.`),
+                title:
+                  data.title ||
+                  (isPodium ? `Pódio: ${data.groupName || "seu grupo"}` : data.groupName || "Grupo"),
+                description:
+                  data.description ||
+                  (isGroupInvite
+                    ? `${data.actorName || "Alguém"} convidou você para um grupo.`
+                    : isPodium
+                    ? `Seu grupo ${data.groupName || "finalizou"} e você recebeu um prêmio.`
+                    : `${data.actorName || "Alguém"} removeu você do grupo.`),
                 actorName: data.actorName || undefined,
                 recipientUid: data.recipientUid,
                 ownerId: data.ownerId,
                 status,
                 timestamp: toTimestamp(rawCreatedAt),
                 rawCreatedAt,
-              } satisfies AppNotificationItem;
+              } as AppNotificationItem;
             }
 
             return null;
@@ -327,7 +336,7 @@ export function useAppNotifications() {
                 status: undefined,
                 timestamp: toTimestamp(rawCreatedAt),
                 rawCreatedAt,
-              } satisfies AppNotificationItem;
+              } as AppNotificationItem;
             })
             .filter((item): item is AppNotificationItem => item !== null);
 
@@ -408,7 +417,7 @@ export function useAppNotifications() {
                   status: undefined,
                   timestamp: toTimestamp(rawCreatedAt),
                   rawCreatedAt,
-                } satisfies AppNotificationItem;
+                } as AppNotificationItem;
               }
 
               return null;

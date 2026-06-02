@@ -14,6 +14,7 @@ import { useSocial } from "../src/SocialContext";
 import { useRecycling } from "../src/RecyclingContext";
 import { useRecyclingTypes } from "../src/RecyclingTypesContext";
 import { useThemePreference } from "../src/ThemePreferenceContext";
+import MedalsModal from "../src/MedalsModal";
 import { translateFirebaseError } from "../src/firebaseErrorMapper";
 import { captureRecyclingEvidenceLocation, captureRecyclingEvidencePhoto } from "../src/recyclingEvidence";
 import { db } from "../service/firebaseConfig";
@@ -44,6 +45,20 @@ type GroupEvidenceEntry = {
     createdAt: string;
   }>;
   createdAt: string;
+};
+
+type GroupPodiumMember = {
+  position: number;
+  memberId: string;
+  name: string;
+  totalXp: number;
+  actionsCount: number;
+};
+
+type GroupPodium = {
+  podium: GroupPodiumMember[];
+  finalizedAt?: string | null;
+  endedAt?: string | null;
 };
 
 function normalizeDateString(value: unknown) {
@@ -162,6 +177,9 @@ export default function MyGroupsScreen() {
   const [manageGroupImageUrl, setManageGroupImageUrl] = useState("");
   const [manageMemberName, setManageMemberName] = useState("");
   const [groupEvidenceEntries, setGroupEvidenceEntries] = useState<GroupEvidenceEntry[]>([]);
+  const [selectedGroupPodium, setSelectedGroupPodium] = useState<GroupPodium | null>(null);
+  const [selectedMedalUserId, setSelectedMedalUserId] = useState<string | null>(null);
+  const [selectedMedalUserName, setSelectedMedalUserName] = useState<string | null>(null);
   const [recordModalVisible, setRecordModalVisible] = useState(false);
   const [contestModalVisible, setContestModalVisible] = useState(false);
   const [contestReason, setContestReason] = useState("");
@@ -355,6 +373,40 @@ export default function MyGroupsScreen() {
     return () => unsubscribe();
   }, [selectedGroup?.id]);
 
+  useEffect(() => {
+    if (!selectedGroup?.id) {
+      setSelectedGroupPodium(null);
+      return;
+    }
+
+    const podiumRef = doc(db, "groups", selectedGroup.id, "podium", "final");
+    const unsubscribe = onSnapshot(
+      podiumRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setSelectedGroupPodium(null);
+          return;
+        }
+
+        const data = snapshot.data();
+        setSelectedGroupPodium({
+          podium: Array.isArray(data?.podium) ? data.podium : [],
+          finalizedAt: data?.finalizedAt ? normalizeDateString(data.finalizedAt) : null,
+          endedAt: data?.endedAt ? normalizeDateString(data.endedAt) : null,
+        });
+      },
+      (error) => {
+        if (error.code === "permission-denied") {
+          setSelectedGroupPodium(null);
+          return;
+        }
+        console.warn("Group podium listener failed:", error);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [selectedGroup?.id]);
+
   const currentUserId = auth.currentUser?.uid || null;
   const currentUserName = auth.currentUser?.displayName?.trim() || auth.currentUser?.email?.split("@")[0] || "Você";
   const canManageSelectedGroup = Boolean(
@@ -367,7 +419,6 @@ export default function MyGroupsScreen() {
         const isOwner = group.ownerId === currentUserId;
         const isMember = group.members.some((member) => member.id === currentUserId);
         if (!isOwner && !isMember) return false;
-        if (!group.isActive && !isOwner) return false;
         return true;
       })
       .sort((a, b) => b.totalXp - a.totalXp);
@@ -426,9 +477,18 @@ export default function MyGroupsScreen() {
   const orderedRecyclingTypes = useMemo(() => {
     const key = "descarte em ecoponto";
     const lowerKey = key.toLowerCase();
-    const found = recyclingTypes.find((type) => String(type.type).toLowerCase() === lowerKey);
-    if (!found) return recyclingTypes;
-    return [found, ...recyclingTypes.filter((type) => type.id !== found.id)];
+    const seen = new Set<string>();
+    const uniqueTypes = recyclingTypes.filter((type) => {
+      const normalizedType = String(type.type).trim().toLowerCase();
+      if (seen.has(normalizedType)) {
+        return false;
+      }
+      seen.add(normalizedType);
+      return true;
+    });
+    const found = uniqueTypes.find((type) => String(type.type).trim().toLowerCase() === lowerKey);
+    if (!found) return uniqueTypes;
+    return [found, ...uniqueTypes.filter((type) => type.id !== found.id)];
   }, [recyclingTypes]);
 
   const groupChat = useMemo(() => {
@@ -1110,6 +1170,34 @@ export default function MyGroupsScreen() {
               </View>
             </View>
 
+            {selectedGroupPodium ? (
+              <View style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 16, marginTop: 12 }}>
+                <Text style={{ color: palette.textPrimary, fontWeight: "800", marginBottom: 10 }}>Pódio final</Text>
+                {selectedGroupPodium.endedAt ? (
+                  <Text style={{ color: palette.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                    Finalizado em {new Date(selectedGroupPodium.endedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                  </Text>
+                ) : null}
+                {selectedGroupPodium.podium.length === 0 ? (
+                  <Text style={{ color: palette.textSecondary, fontSize: 12 }}>Nenhum pódio registrado.</Text>
+                ) : (
+                  selectedGroupPodium.podium.map((member) => (
+                    <View key={member.memberId} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: member.position === selectedGroupPodium.podium.length ? 0 : 1, borderBottomColor: palette.cardBorder }}>
+                      <View>
+                        <Text style={{ color: palette.textPrimary, fontWeight: "800" }}>#{member.position} {member.name}</Text>
+                        <Text style={{ color: palette.textSecondary, fontSize: 12 }}>{member.actionsCount} ações</Text>
+                      </View>
+                      <Text style={{ color: palette.recycleAccent, fontWeight: "800" }}>{member.totalXp} XP</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : selectedGroup.isActive ? null : (
+              <View style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 16, marginTop: 12 }}>
+                <Text style={{ color: palette.textSecondary, fontSize: 12 }}>O grupo foi finalizado, mas o pódio ainda não está disponível.</Text>
+              </View>
+            )}
+
             <View style={{ backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, borderRadius: 18, padding: 16 }}>
               <Text style={{ color: palette.textPrimary, fontWeight: "800", marginBottom: 10 }}>Classificação</Text>
               {groupMembers.length === 0 ? (
@@ -1335,7 +1423,15 @@ export default function MyGroupsScreen() {
                           gap: 10,
                         }}
                       >
-                        <View style={{ width: 34, height: 34, borderRadius: 12, overflow: "hidden", backgroundColor: isMine ? palette.recycleAccent : palette.panelAlt, alignItems: "center", justifyContent: "center" }}>
+                        <TouchableOpacity
+                      onPress={() => {
+                        if (!message.authorId) return;
+                        const memberName = usersById.get(message.authorId)?.username || message.authorName || "Usuário";
+                        setSelectedMedalUserId(message.authorId);
+                        setSelectedMedalUserName(memberName);
+                      }}
+                      style={{ width: 34, height: 34, borderRadius: 12, overflow: "hidden", backgroundColor: isMine ? palette.recycleAccent : palette.panelAlt, alignItems: "center", justifyContent: "center" }}
+                    >
                           {usersById.get(message.authorId || "")?.avatarUrl ? (
                             <Image source={{ uri: usersById.get(message.authorId || "")!.avatarUrl! }} style={{ width: 34, height: 34 }} contentFit="cover" />
                           ) : (
@@ -1343,7 +1439,7 @@ export default function MyGroupsScreen() {
                               <Text style={{ color: isMine ? palette.panel : palette.textPrimary, fontWeight: "900", fontSize: 11 }}>{initials}</Text>
                             </View>
                           )}
-                        </View>
+                        </TouchableOpacity>
 
                         <View style={{ flex: 1, alignItems: isMine ? "flex-end" : "flex-start" }}>
                           <View
@@ -2254,6 +2350,15 @@ export default function MyGroupsScreen() {
         </View>
       </Modal>
 
+      <MedalsModal
+        visible={Boolean(selectedMedalUserId)}
+        userId={selectedMedalUserId || ""}
+        userLabel={selectedMedalUserName || "Usuário"}
+        onClose={() => {
+          setSelectedMedalUserId(null);
+          setSelectedMedalUserName(null);
+        }}
+      />
     </View>
   );
 }
