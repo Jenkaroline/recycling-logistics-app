@@ -61,10 +61,15 @@ export const db = Platform.OS === "web"
   ? getFirestore(app)
   : (() => {
       try {
-        return initializeFirestore(app, {
+        const firestore = initializeFirestore(app, {
           experimentalForceLongPolling: true,
           useFetchStreams: false,
         });
+        // Enable offline persistence for mobile
+        if (typeof firestore?.settings === "function") {
+          firestore.settings({ cacheSizeBytes: 100 * 1024 * 1024 });
+        }
+        return firestore;
       } catch {
         return getFirestore(app);
       }

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, DrawerActions } from "@react-navigation/native";
 import { useDrawerStatus } from "@react-navigation/drawer";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +10,7 @@ import { useRecyclingCompetition } from "./RecyclingCompetitionContext";
 import { useSocial } from "./SocialContext";
 import { useThemePreference } from "./ThemePreferenceContext";
 import { AppNotificationItem, useAppNotifications } from "./useAppNotifications";
+import PodiumModal from "./PodiumModal";
 
 type NotificationSection = {
   title: string;
@@ -56,6 +57,8 @@ function kindLabel(kind: AppNotificationItem["kind"]) {
       return "Chat";
     case "evidence":
       return "Evidência";
+    case "group-podium":
+      return "Pódio";
     default:
       return "Notificação";
   }
@@ -83,6 +86,11 @@ function getNotificationTone(item: AppNotificationItem, darkModeEnabled: boolean
       tint: darkModeEnabled ? "rgba(255, 139, 148, 0.12)" : "rgba(179, 49, 77, 0.08)",
       border: darkModeEnabled ? "rgba(255, 139, 148, 0.28)" : "rgba(179, 49, 77, 0.18)",
     },
+    "group-podium": {
+      accent: darkModeEnabled ? "#f5d63b" : "#b07f09",
+      tint: darkModeEnabled ? "rgba(245, 214, 59, 0.14)" : "rgba(176, 127, 9, 0.12)",
+      border: darkModeEnabled ? "rgba(245, 214, 59, 0.28)" : "rgba(176, 127, 9, 0.18)",
+    },
     default: {
       accent: darkModeEnabled ? "#c7d8ea" : "#5d748b",
       tint: darkModeEnabled ? "rgba(199, 216, 234, 0.10)" : "rgba(93, 116, 139, 0.08)",
@@ -107,6 +115,7 @@ export default function NotificationsScreen() {
   const { notifications, markNotificationsAsSeen } = useAppNotifications();
   const { darkModeEnabled } = useThemePreference();
   const { users: socialUsers } = useSocial();
+  const [activePodiumGroupId, setActivePodiumGroupId] = useState<string | null>(null);
 
   const usersById = useMemo(() => {
     const map = new Map<string, any>();
@@ -302,6 +311,12 @@ export default function NotificationsScreen() {
                               return;
                             }
 
+                            // direct podium notifications to a modal view
+                            if (item.kind === "group-podium" && item.groupId) {
+                              setActivePodiumGroupId(item.groupId);
+                              return;
+                            }
+
                             // invitation, invitation-response, member-removed or other group-scoped
                             if (item.groupId) {
                               navigation.navigate("MeusGrupos", { groupId: item.groupId, tab: "stats" });
@@ -399,6 +414,7 @@ export default function NotificationsScreen() {
           </View>
         </View>
       </ScrollView>
+      <PodiumModal visible={Boolean(activePodiumGroupId)} groupId={activePodiumGroupId || ""} onClose={() => setActivePodiumGroupId(null)} />
     </View>
   );
 }
