@@ -734,7 +734,9 @@ export default function SettingsScreen() {
           ? `\n\nDetalhe do servidor: ${serverPayload.slice(0, 240)}`
           : "";
 
-      Alert.alert("Erro", `${translateFirebaseError(error)}${hint}`);
+      // Alert.alert("Erro", `${translateFirebaseError(error)}${hint}`);
+      Alert.alert("Erro", "Não foi possível atualizar a foto. Tente novamente.");
+
     } finally {
       setUploadingPhoto(false);
     }
@@ -794,13 +796,6 @@ export default function SettingsScreen() {
         ],
       });
     } catch (error: any) {
-      console.error("[settings][email-change] failed", {
-        code: error?.code,
-        message: error?.message,
-        customData: error?.customData,
-        serverResponse:
-          error?.customData?.serverResponse || error?.serverResponse,
-      });
       if (error?.code === "auth/operation-not-allowed") {
         setNewEmail("");
         setCurrentPassword("");
@@ -821,10 +816,15 @@ export default function SettingsScreen() {
         });
         return;
       }
-      Alert.alert(
-        "Falha ao atualizar e-mail",
-        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e tente novamente.`,
-      );
+      if (error?.code === "auth/invalid-credential" || error?.code === "auth/wrong-password") {
+        Alert.alert("Senha incorreta", "A senha atual informada está incorreta. Tente novamente.");
+      } else if (error?.code === "auth/email-already-in-use") {
+        Alert.alert("E-mail já cadastrado", "Esse e-mail já está em uso por outra conta.");
+      } else if (error?.code === "auth/network-request-failed") {
+        Alert.alert("Sem conexão", "Verifique sua internet e tente novamente.");
+      } else {
+        Alert.alert("Falha ao atualizar e-mail", "Não foi possível atualizar o e-mail. Tente novamente.");
+      }
     } finally {
       setLoadingAccount(false);
     }
@@ -867,9 +867,9 @@ export default function SettingsScreen() {
       Alert.alert("Ok", "Senha atualizada.");
     } catch (error: any) {
       Alert.alert(
-        "Falha ao atualizar senha",
-        `${translateFirebaseError(error)}\n\nDica: confira a senha atual e os requisitos da nova senha.`,
-      );
+       "Falha ao atualizar senha",
+       "Não foi possível atualizar a senha. Confirme se ela atende os requisitos.",
+);
     } finally {
       setLoadingAccount(false);
     }
@@ -898,7 +898,7 @@ export default function SettingsScreen() {
       setActivePanel("none");
       Alert.alert("Ok", "Nome de usuário atualizado.");
     } catch (error: any) {
-      Alert.alert("Falha ao atualizar nome", translateFirebaseError(error));
+      Alert.alert("Falha ao atualizar nome", "Não foi possível atualizar o nome. Tente novamente.");
     } finally {
       setLoadingAccount(false);
     }
@@ -941,7 +941,7 @@ export default function SettingsScreen() {
                         "Sua conta foi removida com sucesso.",
                       );
                     } catch (error: any) {
-                      Alert.alert("Erro", translateFirebaseError(error));
+                      Alert.alert("Falha ao excluir conta", "Não foi possível excluir a conta. Tente novamente.");
                     }
                   },
                 },

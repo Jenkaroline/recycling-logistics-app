@@ -90,53 +90,48 @@ export default function MedalsModal({ visible, onClose, userId, userLabel }: Med
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: palette.overlay, justifyContent: "center", padding: 18 }}>
-        <View style={{ borderRadius: 24, backgroundColor: palette.panel, overflow: "hidden", maxHeight: "92%", borderWidth: 1, borderColor: palette.cardBorder }}>
-          <View style={{ padding: 18, backgroundColor: palette.panelAlt, borderBottomWidth: 1, borderColor: palette.cardBorder }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: palette.textPrimary, fontSize: 22, fontWeight: "900" }}>{userLabel ? `${userLabel} - Medalhas` : "Medalhas"}</Text>
-                <Text style={{ color: palette.textSecondary, fontSize: 13, marginTop: 6 }}>Conquistas do perfil exibidas com estilo e histórico claro.</Text>
-              </View>
-              <TouchableOpacity onPress={onClose} style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: palette.panel, borderWidth: 1, borderColor: palette.cardBorder, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="close" size={20} color={palette.textPrimary} />
-              </TouchableOpacity>
+        <View style={{ borderRadius: 24, backgroundColor: palette.panel, overflow: "hidden", maxHeight: "90%" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 18, borderBottomWidth: 1, borderColor: palette.cardBorder }}>
+            <View>
+              <Text style={{ color: palette.textPrimary, fontSize: 20, fontWeight: "900" }}>{userLabel ? `${userLabel} - Medalhas` : "Medalhas"}</Text>
+              <Text style={{ color: palette.textSecondary, fontSize: 13, marginTop: 4 }}>Conquistas guardadas no perfil.</Text>
             </View>
+            <TouchableOpacity onPress={onClose} style={{ padding: 8, borderRadius: 14, backgroundColor: palette.panelAlt }}>
+              <Ionicons name="close" size={20} color={palette.textPrimary} />
+            </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 18, gap: 16 }}>
+          <ScrollView contentContainerStyle={{ padding: 18, gap: 14 }}>
             {loading ? (
-              <View style={{ minHeight: 200, justifyContent: "center", alignItems: "center" }}>
+              <View style={{ minHeight: 180, justifyContent: "center", alignItems: "center" }}>
                 <ActivityIndicator color={palette.textPrimary} size="large" />
               </View>
             ) : medals.length === 0 ? (
-              <View style={{ minHeight: 180, justifyContent: "center", alignItems: "center", padding: 18 }}>
-                <Text style={{ color: palette.textPrimary, fontSize: 16, fontWeight: "800", marginBottom: 8 }}>Nenhuma medalha encontrada</Text>
-                <Text style={{ color: palette.textSecondary, fontSize: 14, textAlign: "center" }}>As medalhas aparecem aqui quando você participa de competições e conquista posições no pódio.</Text>
+              <View style={{ minHeight: 160, justifyContent: "center", alignItems: "center" }}>
+                <Text style={{ color: palette.textSecondary, fontSize: 15 }}>Nenhuma medalha encontrada para este perfil.</Text>
               </View>
             ) : (
               medals.map((medal) => (
                 <View
                   key={medal.id}
                   style={{
-                    borderRadius: 22,
+                    borderRadius: 20,
                     backgroundColor: palette.panelAlt,
                     borderWidth: 1,
                     borderColor: palette.cardBorder,
-                    padding: 18,
+                    padding: 16,
                     flexDirection: "row",
                     alignItems: "center",
-                    gap: 16,
+                    gap: 14,
                   }}
                 >
-                  <View style={{ width: 60, height: 60, borderRadius: 18, overflow: "hidden", backgroundColor: palette.panel, alignItems: "center", justifyContent: "center" }}>
-                    <Image source={medalImages[medal.position] || medalImages[3]} style={{ width: 56, height: 56 }} />
+                  <View style={{ width: 56, height: 56, borderRadius: 18, overflow: "hidden", backgroundColor: palette.overlay, alignItems: "center", justifyContent: "center" }}>
+                    <Image source={medalImages[medal.position] || medalImages[3]} style={{ width: 52, height: 52 }} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: palette.textPrimary, fontSize: 17, fontWeight: "900" }} numberOfLines={1} ellipsizeMode="tail">
-                      {medal.groupName}
-                    </Text>
-                    <Text style={{ color: palette.textSecondary, fontSize: 13, marginTop: 6 }}>Posição {medal.position}</Text>
-                    {medal.endedAt ? <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 6 }}>Finalizado em {new Date(medal.endedAt).toLocaleDateString("pt-BR")}</Text> : null}
+                    <Text style={{ color: palette.textPrimary, fontSize: 16, fontWeight: "800" }}>{medal.groupName}</Text>
+                    <Text style={{ color: palette.textSecondary, fontSize: 13, marginTop: 4 }}>Posição {medal.position}</Text>
+                    {medal.endedAt ? <Text style={{ color: palette.textSecondary, fontSize: 12, marginTop: 4 }}>Finalizado em {new Date(medal.endedAt).toLocaleDateString("pt-BR")}</Text> : null}
                   </View>
                 </View>
               ))
